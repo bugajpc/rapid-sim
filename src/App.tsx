@@ -51,8 +51,17 @@ export function App() {
   const [trail, setTrail] = useState<[number, number, number][]>([]);
   const [activeLine, setActiveLine] = useState<number>();
   const [awaiting, setAwaiting] = useState<{ signal: string; value: boolean }>();
-  const [simulationWidth, setSimulationWidth] = useState(440);
   const [lessonsOpen, setLessonsOpen] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(250);
+  const [simulationWidth, setSimulationWidth] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const initialSidebar = 250;
+      const separators = 12;
+      const available = window.innerWidth - initialSidebar - separators;
+      return Math.max(320, Math.floor(available / 2));
+    }
+    return 540;
+  });
   const [bottomHeight, setBottomHeight] = useState(235);
   const [contextMenu, setContextMenu] = useState<
     | { type: "target"; x: number; y: number; target: string }
@@ -730,13 +739,18 @@ export function App() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
+    const handleLayout = () => {
       const panel = editorPanelRef.current;
       if (!panel || !monacoEditorRef.current) return;
       monacoEditorRef.current.layout({ width: panel.clientWidth, height: Math.max(0, panel.clientHeight - 38) });
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [simulationWidth, lessonsOpen, bottomHeight]);
+    };
+    const frame = window.requestAnimationFrame(handleLayout);
+    window.addEventListener("resize", handleLayout);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", handleLayout);
+    };
+  }, [simulationWidth, lessonsOpen, sidebarWidth, bottomHeight]);
   useEffect(() => {
     if (!contextMenu) return;
     const handlePointerDown = (event: PointerEvent) => {
@@ -758,13 +772,28 @@ export function App() {
   }, [contextMenu]);
   useEffect(() => () => { clearTimer(); clearAllDropTimers(); }, []);
 
+  const startSidebarResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (moveEvent: PointerEvent) => {
+      const maxSidebarWidth = Math.max(180, window.innerWidth - simulationWidth - 300 - 12);
+      setSidebarWidth(Math.min(maxSidebarWidth, Math.max(180, startWidth + (moveEvent.clientX - startX))));
+    };
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+  };
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
     event.preventDefault();
     const startX = event.clientX;
     const startWidth = simulationWidth;
     const onMove = (moveEvent: PointerEvent) => {
-      const lessonsWidth = lessonsOpen ? 212 : 38;
-      const maxWidth = Math.max(300, window.innerWidth - lessonsWidth - 320 - 6);
+      const currentSidebar = lessonsOpen ? sidebarWidth : 38;
+      const maxWidth = Math.max(300, window.innerWidth - currentSidebar - 300 - 12);
       setSimulationWidth(Math.min(maxWidth, Math.max(300, startWidth - (moveEvent.clientX - startX))));
     };
     const onUp = () => {
@@ -792,7 +821,7 @@ export function App() {
 
   return <main style={{ gridTemplateRows: `52px minmax(0, 1fr) 6px ${bottomHeight}px` }}>
     <header><div className="brand"><span className="brand-dot">R</span><strong>RAPID Sim</strong><span className="robot-label">ABB IRB 1090 <i>·</i> OmniCore learning simulator</span></div><div className="controls"><div className="history-controls" aria-label="Historia zmian"><button onClick={undo} disabled={!canUndo} title="Cofnij (Cmd+Z / Ctrl+Z)">↺ Undo</button><button onClick={redo} disabled={!canRedo} title="Ponow (Cmd+Shift+Z / Ctrl+Y)">↻ Redo</button></div><div className="tool-switch" aria-label="Wybierz narzedzie"><button className={tool === "pen" ? "active" : ""} onClick={() => changeTool("pen")}>Pen</button><button className={tool === "gripper" ? "active" : ""} onClick={() => changeTool("gripper")}>Gripper</button></div><Status status={status} /><button className="primary" onClick={run}>Run</button><button onClick={stop}>Pause</button><button onClick={reset}>Reset</button></div></header>
-    <section className="workspace" style={{ gridTemplateColumns: `${lessonsOpen ? "212px" : "38px"} minmax(300px, 1fr) 6px ${simulationWidth}px` }}>
+    <section className="workspace" style={{ gridTemplateColumns: `${lessonsOpen ? `${sidebarWidth}px 6px` : "38px 0px"} minmax(300px, 1fr) 6px ${simulationWidth}px` }}>
       <aside className={`lessons ${lessonsOpen ? "" : "collapsed"}`}>
         <button className="lesson-collapse" onClick={() => setLessonsOpen((open) => !open)} aria-label={lessonsOpen ? "Zwin panel" : "Rozwin panel"}>{lessonsOpen ? "‹" : "›"}</button>
         {lessonsOpen && <>
@@ -901,7 +930,16 @@ export function App() {
           </div>
         </>}
       </aside>
-       <section className="editor-panel" ref={editorPanelRef}><div className="panel-head"><div><span className="file-dot" /> MainModule.mod</div><span>RAPID</span></div><Editor height="100%" value={code} onChange={handleCodeChange} onMount={editorMount} theme="vs-dark" options={{ automaticLayout: true, fontSize: 14, minimap: { enabled: false }, lineNumbers: "on", scrollBeyondLastLine: false, padding: { top: 14 }, fontFamily: "SFMono-Regular, Consolas, monospace" }} /></section>
+      {lessonsOpen && (
+        <div
+          className="sidebar-resize-handle"
+          onPointerDown={startSidebarResize}
+          role="separator"
+          aria-label="Zmien szerokosc panelu bocznego"
+          aria-orientation="vertical"
+        />
+      )}
+      <section className="editor-panel" ref={editorPanelRef}><div className="panel-head"><div><span className="file-dot" /> MainModule.mod</div><span>RAPID</span></div><Editor height="100%" value={code} onChange={handleCodeChange} onMount={editorMount} theme="vs-dark" options={{ automaticLayout: true, fontSize: 14, minimap: { enabled: false }, lineNumbers: "on", scrollBeyondLastLine: false, padding: { top: 14 }, fontFamily: "SFMono-Regular, Consolas, monospace" }} /></section>
       <div className="resize-handle" onPointerDown={startResize} role="separator" aria-label="Zmien szerokosc widoku symulacji" aria-orientation="vertical" />
         <section className="sim-panel">
           <div className="panel-head">
