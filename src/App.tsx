@@ -47,6 +47,7 @@ export function App() {
   const [customTargets, setCustomTargets] = useState<string[]>([]);
   const [selectedTarget, setSelectedTarget] = useState<string>();
   const [tcpEditing, setTcpEditing] = useState(false);
+  const [tcpPitch, setTcpPitch] = useState<number>(-90);
   const [trail, setTrail] = useState<[number, number, number][]>([]);
   const [activeLine, setActiveLine] = useState<number>();
   const [awaiting, setAwaiting] = useState<{ signal: string; value: boolean }>();
@@ -67,6 +68,7 @@ export function App() {
   const tablePositionRef = useRef<[number, number]>(defaultTablePosition);
   const cancelled = useRef(false);
   const tcpRef = useRef<[number, number, number]>(initialPose);
+  const tcpPitchRef = useRef<number>(-90);
   const trailRef = useRef<[number, number, number][]>([]);
   const targetPositionsRef = useRef<Record<string, [number, number, number]>>({ ...targets });
   const customTargetsRef = useRef<string[]>([]);
@@ -130,6 +132,7 @@ export function App() {
     targets: { ...targetPositionsRef.current },
     customTargets: [...customTargetsRef.current],
     tcp: [...tcpRef.current],
+    tcpPitch: tcpPitchRef.current,
     tool: toolRef.current,
     showTable: showTableRef.current,
     tablePosition: [...tablePositionRef.current],
@@ -152,6 +155,10 @@ export function App() {
     setCustomTargets([...snapshot.customTargets]);
     tcpRef.current = [...snapshot.tcp];
     setTcp([...snapshot.tcp]);
+    if (snapshot.tcpPitch !== undefined) {
+      tcpPitchRef.current = snapshot.tcpPitch;
+      setTcpPitch(snapshot.tcpPitch);
+    }
     toolRef.current = snapshot.tool;
     setTool(snapshot.tool);
     showTableRef.current = snapshot.showTable;
@@ -214,6 +221,8 @@ export function App() {
     setInputs(initialInputs);
     setOutputs(initialOutputs);
     setTcp(initialPose);
+    tcpPitchRef.current = -90;
+    setTcpPitch(-90);
     setBlocks(resetBlocks);
     setHeldBlockId(null);
     setSelectedBlockId(null);
@@ -500,7 +509,10 @@ export function App() {
     log(`Dodano punkt ${name} = [${finalPoint.map((value) => Math.round(value)).join(", ")}] mm.`);
   };
   const removeTarget = (name: string) => {
-    if (!customTargetsRef.current.includes(name)) { log(`Nie mozna usunac wbudowanego punktu ${name}.`); setContextMenu(undefined); return; }
+    if (!targetPositionsRef.current[name]) {
+      setContextMenu(undefined);
+      return;
+    }
     pushSceneSnapshot();
     const { [name]: _removed, ...remaining } = targetPositionsRef.current;
     targetPositionsRef.current = remaining;
@@ -527,6 +539,7 @@ export function App() {
     tablePosition: tablePositionRef.current,
     blocks: blocksRef.current,
     tcp: tcpRef.current,
+    tcpPitch: tcpPitchRef.current,
   });
   const saveProject = () => {
     const project = projectSnapshot();
@@ -566,6 +579,10 @@ export function App() {
       tcpRef.current = project.tcp;
       setTcp(project.tcp);
     }
+    if (project.tcpPitch !== undefined) {
+      tcpPitchRef.current = project.tcpPitch;
+      setTcpPitch(project.tcpPitch);
+    }
     undoStackRef.current = [];
     redoStackRef.current = [];
     updateUndoRedoState();
@@ -592,6 +609,8 @@ export function App() {
     setBlocks(defaultBlocks);
     tcpRef.current = initialPose;
     setTcp(initialPose);
+    tcpPitchRef.current = -90;
+    setTcpPitch(-90);
     undoStackRef.current = [];
     redoStackRef.current = [];
     updateUndoRedoState();
@@ -622,6 +641,12 @@ export function App() {
       }
       loadProject(project);
     } catch (error) { log(`BLAD importu: ${error instanceof Error ? error.message : "nieznany plik"}`); }
+  };
+  const clearSelection = () => {
+    setSelectedTarget(undefined);
+    setTcpEditing(false);
+    setSelectedBlockId(null);
+    setTableEditing(false);
   };
   const moveTcp = (position: [number, number, number]) => {
     clearTimer();
@@ -713,8 +738,24 @@ export function App() {
     return () => window.cancelAnimationFrame(frame);
   }, [simulationWidth, lessonsOpen, bottomHeight]);
   useEffect(() => {
-    if (status === "Waiting for DI" && awaiting && inputs[awaiting.signal] === awaiting.value) { setAwaiting(undefined); setStatus("Running"); next(); }
-  }, [inputs, awaiting, status]);
+    if (!contextMenu) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      const el = event.target as HTMLElement | null;
+      if (el?.closest(".context-menu")) return;
+      setContextMenu(undefined);
+    };
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setContextMenu(undefined);
+      }
+    };
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleEscape);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleEscape);
+    };
+  }, [contextMenu]);
   useEffect(() => () => { clearTimer(); clearAllDropTimers(); }, []);
 
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -862,11 +903,236 @@ export function App() {
       </aside>
        <section className="editor-panel" ref={editorPanelRef}><div className="panel-head"><div><span className="file-dot" /> MainModule.mod</div><span>RAPID</span></div><Editor height="100%" value={code} onChange={handleCodeChange} onMount={editorMount} theme="vs-dark" options={{ automaticLayout: true, fontSize: 14, minimap: { enabled: false }, lineNumbers: "on", scrollBeyondLastLine: false, padding: { top: 14 }, fontFamily: "SFMono-Regular, Consolas, monospace" }} /></section>
       <div className="resize-handle" onPointerDown={startResize} role="separator" aria-label="Zmien szerokosc widoku symulacji" aria-orientation="vertical" />
-        <section className="sim-panel"><div className="panel-head"><div>3D SIMULATION</div><div className="sim-head-actions"><button className={showTable ? "active" : ""} onClick={() => { pushSceneSnapshot(); setShowTable((v) => !v); }}>{showTable ? "Table ON" : "Table OFF"}</button>{tool === "gripper" && <div className="block-stepper" title="Liczba blokow"><span>Blocks:</span><button onClick={() => setBlockCount(blocks.length - 1)} disabled={blocks.length <= 1}>−</button><b>{blocks.length}</b><button onClick={() => setBlockCount(blocks.length + 1)} disabled={blocks.length >= 28}>+</button><button onClick={addBlock}>+ Block</button></div>}<button onClick={openNewTargetDialog}>Add point at TCP</button><span>TCP {tcp.map((value) => Math.round(value)).join(" / ")} mm</span></div></div><div className="canvas"><RobotScene tcp={tcp} target={target} trail={trail} targets={targetPositions} visibleTargets={visibleTargets} selectedTarget={selectedTarget} tcpEditing={tcpEditing} onSelectTarget={(name) => { setTcpEditing(false); setSelectedBlockId(null); setTableEditing(false); setSelectedTarget(name); }} onSelectTcp={() => { setSelectedTarget(undefined); setSelectedBlockId(null); setTableEditing(false); setTcpEditing(true); }} onMoveTarget={moveTarget} onMoveTcp={moveTcp} onDragStart={pushSceneSnapshot} tool={tool} gripperClosed={outputs.doGripper} fadeWhileRunning={status !== "Running"} blocks={blocks} heldBlockId={heldBlockId} selectedBlockId={selectedBlockId} onSelectBlock={(id) => { setSelectedTarget(undefined); setTcpEditing(false); setTableEditing(false); setSelectedBlockId(id); }} onMoveBlock={(id, position) => { clearBlockDropTimer(id); updateBlockPosition(id, position); }} onBlockContextMenu={(screenPosition, id) => { const clampedX = Math.max(10, Math.min(screenPosition.x, window.innerWidth - 210)); const clampedY = Math.max(10, Math.min(screenPosition.y, window.innerHeight - 160)); setContextMenu({ type: "block", x: clampedX, y: clampedY, id }); }} onTargetContextMenu={(screenPosition, name) => { const clampedX = Math.max(10, Math.min(screenPosition.x, window.innerWidth - 210)); const clampedY = Math.max(10, Math.min(screenPosition.y, window.innerHeight - 160)); setContextMenu({ type: "target", x: clampedX, y: clampedY, target: name }); }} showTable={showTable} tablePosition={tablePosition} tableEditing={tableEditing} onSelectTable={() => { setSelectedTarget(undefined); setTcpEditing(false); setSelectedBlockId(null); setTableEditing(true); }} onMoveTable={(position) => { tablePositionRef.current = position; setTablePosition(position); }} /></div><div className="sim-footer"><div className="sim-info"><span className="sim-tool"><b>Tool</b> {tool === "pen" ? "tPen" : "tGripper"}</span><span className="sim-target"><b>Target</b> {target ?? "-"}</span><span className="sim-line"><b>Line</b> {activeLine ?? "-"}</span><span className="sim-reach"><b>Reach</b> {robotReach.minimum}-{robotReach.maximum} mm</span>{tool === "gripper" && <span className="sim-block-count"><b>Blocks</b> {blocks.length}</span>}{showTable && !tableEditing && <span className="sim-table"><b>Table</b> [{tablePosition.map((value) => Math.round(value)).join(", ")}] mm</span>}{selectedTarget && <span className="sim-edit"><b>Edit</b> {selectedTarget} [{targetPositions[selectedTarget].map((value) => Math.round(value)).join(", ")}]</span>}{tcpEditing && <span className="sim-edit"><b>Edit</b> TCP</span>}{tableEditing && <span className="sim-edit"><b>Edit</b> table [{tablePosition.map((value) => Math.round(value)).join(", ")}]</span>}{selectedBlockId && (() => { const b = blocks.find((item) => item.id === selectedBlockId); const idx = blocks.findIndex((item) => item.id === selectedBlockId); return b ? <span className="sim-edit"><b>Edit</b> block #{idx + 1} [{b.position.map((v) => Math.round(v)).join(", ")}]</span> : null; })()}<span className="legend">right-click a custom point or block to remove</span></div></div></section>
+        <section className="sim-panel">
+          <div className="panel-head">
+            <div>3D SIMULATION</div>
+            <div className="sim-head-actions">
+              <div className="tcp-pitch-controls" title="Orientacja narzędzia TCP (kąt w pionie)">
+                <span>TCP:</span>
+                <button
+                  className={tcpPitch === -90 ? "active" : ""}
+                  onClick={() => {
+                    pushSceneSnapshot();
+                    setTcpPitch(-90);
+                    tcpPitchRef.current = -90;
+                    log("Orientacja TCP: Pionowo w dół (-90°).");
+                  }}
+                  title="Skieruj narzędzie pionowo w dół (-90°)"
+                >
+                  ⬇ Pion
+                </button>
+                <button
+                  className={tcpPitch === -45 ? "active" : ""}
+                  onClick={() => {
+                    pushSceneSnapshot();
+                    setTcpPitch(-45);
+                    tcpPitchRef.current = -45;
+                    log("Orientacja TCP: Pochylenie (-45°).");
+                  }}
+                  title="Pochyl narzędzie pod kątem -45°"
+                >
+                  ↘ 45°
+                </button>
+                <button
+                  className={tcpPitch === 0 ? "active" : ""}
+                  onClick={() => {
+                    pushSceneSnapshot();
+                    setTcpPitch(0);
+                    tcpPitchRef.current = 0;
+                    log("Orientacja TCP: Poziomo (0°).");
+                  }}
+                  title="Skieruj narzędzie poziomo (0°)"
+                >
+                  ➡ Poziom
+                </button>
+              </div>
+              <button
+                className={showTable ? "active" : ""}
+                onClick={() => {
+                  pushSceneSnapshot();
+                  setShowTable((v) => !v);
+                }}
+              >
+                {showTable ? "Table ON" : "Table OFF"}
+              </button>
+              {tool === "gripper" && (
+                <div className="block-stepper" title="Liczba blokow">
+                  <span>Blocks:</span>
+                  <button onClick={() => setBlockCount(blocks.length - 1)} disabled={blocks.length <= 1}>
+                    −
+                  </button>
+                  <b>{blocks.length}</b>
+                  <button onClick={() => setBlockCount(blocks.length + 1)} disabled={blocks.length >= 28}>
+                    +
+                  </button>
+                  <button onClick={addBlock}>+ Block</button>
+                </div>
+              )}
+              <button onClick={openNewTargetDialog}>Add point at TCP</button>
+              <span>TCP {tcp.map((value) => Math.round(value)).join(" / ")} mm</span>
+            </div>
+          </div>
+          <div className="canvas">
+            <RobotScene
+              tcp={tcp}
+              tcpPitch={tcpPitch}
+              target={target}
+              trail={trail}
+              targets={targetPositions}
+              visibleTargets={visibleTargets}
+              selectedTarget={selectedTarget}
+              tcpEditing={tcpEditing}
+              onSelectTarget={(name) => {
+                setTcpEditing(false);
+                setSelectedBlockId(null);
+                setTableEditing(false);
+                setSelectedTarget(name);
+              }}
+              onSelectTcp={() => {
+                setSelectedTarget(undefined);
+                setSelectedBlockId(null);
+                setTableEditing(false);
+                setTcpEditing(true);
+              }}
+              onMoveTarget={moveTarget}
+              onMoveTcp={moveTcp}
+              onDragStart={pushSceneSnapshot}
+              tool={tool}
+              gripperClosed={outputs.doGripper}
+              fadeWhileRunning={status !== "Running"}
+              blocks={blocks}
+              heldBlockId={heldBlockId}
+              selectedBlockId={selectedBlockId}
+              onSelectBlock={(id) => {
+                setSelectedTarget(undefined);
+                setTcpEditing(false);
+                setTableEditing(false);
+                setSelectedBlockId(id);
+              }}
+              onMoveBlock={(id, position) => {
+                clearBlockDropTimer(id);
+                updateBlockPosition(id, position);
+              }}
+              onBlockContextMenu={(screenPosition, id) => {
+                const clampedX = Math.max(10, Math.min(screenPosition.x, window.innerWidth - 210));
+                const clampedY = Math.max(10, Math.min(screenPosition.y, window.innerHeight - 160));
+                setContextMenu({ type: "block", x: clampedX, y: clampedY, id });
+              }}
+              onTargetContextMenu={(screenPosition, name) => {
+                const clampedX = Math.max(10, Math.min(screenPosition.x, window.innerWidth - 210));
+                const clampedY = Math.max(10, Math.min(screenPosition.y, window.innerHeight - 160));
+                setContextMenu({ type: "target", x: clampedX, y: clampedY, target: name });
+              }}
+              showTable={showTable}
+              tablePosition={tablePosition}
+              tableEditing={tableEditing}
+              onSelectTable={() => {
+                setSelectedTarget(undefined);
+                setTcpEditing(false);
+                setSelectedBlockId(null);
+                setTableEditing(true);
+              }}
+              onMoveTable={(position) => {
+                tablePositionRef.current = position;
+                setTablePosition(position);
+              }}
+              onClearSelection={clearSelection}
+            />
+          </div>
+          <div className="sim-footer">
+            <div className="sim-info">
+              <span className="sim-tool">
+                <b>Tool</b> {tool === "pen" ? "tPen" : "tGripper"}
+              </span>
+              <span className="sim-pitch">
+                <b>TCP</b> {tcpPitch === -90 ? "Pion ⬇" : tcpPitch === 0 ? "Poziom ➡" : `${tcpPitch}°`}
+              </span>
+              <span className="sim-target">
+                <b>Target</b> {target ?? "-"}
+              </span>
+              <span className="sim-line">
+                <b>Line</b> {activeLine ?? "-"}
+              </span>
+              <span className="sim-reach">
+                <b>Reach</b> {robotReach.minimum}-{robotReach.maximum} mm
+              </span>
+              {tool === "gripper" && (
+                <span className="sim-block-count">
+                  <b>Blocks</b> {blocks.length}
+                </span>
+              )}
+              {showTable && !tableEditing && (
+                <span className="sim-table">
+                  <b>Table</b> [{tablePosition.map((value) => Math.round(value)).join(", ")}] mm
+                </span>
+              )}
+              {selectedTarget && (
+                <span className="sim-edit">
+                  <b>Edit</b> {selectedTarget} [{targetPositions[selectedTarget].map((value) => Math.round(value)).join(", ")}]
+                </span>
+              )}
+              {tcpEditing && <span className="sim-edit"><b>Edit</b> TCP</span>}
+              {tableEditing && (
+                <span className="sim-edit">
+                  <b>Edit</b> table [{tablePosition.map((value) => Math.round(value)).join(", ")}]
+                </span>
+              )}
+              {selectedBlockId &&
+                (() => {
+                  const b = blocks.find((item) => item.id === selectedBlockId);
+                  const idx = blocks.findIndex((item) => item.id === selectedBlockId);
+                  return b ? (
+                    <span className="sim-edit">
+                      <b>Edit</b> block #{idx + 1} [{b.position.map((v) => Math.round(v)).join(", ")}]
+                    </span>
+                  ) : null;
+                })()}
+              <span className="legend">right-click a custom point or block to remove</span>
+            </div>
+          </div>
+        </section>
     </section>
     <div className="bottom-resize-handle" onPointerDown={startBottomResize} role="separator" aria-label="Zmien wysokosc konsoli i sygnalow" aria-orientation="horizontal" />
     <section className="bottom"><div className="console"><div className="tabs"><b>CONSOLE</b><span>DEBUGGER</span></div><div className="terminal">{consoleLines.map((line, index) => <div key={`${line}-${index}`} className={line.includes("BLAD") ? "error-text" : ""}>{line}</div>)}</div></div><div className="signals"><div className="tabs"><b>SIGNALS</b><span>{awaiting ? `WAITING: ${awaiting.signal}` : "I/O BOARD"}</span></div><div className="signal-groups"><SignalGroup title="DIGITAL INPUTS" signals={inputs} waiting={awaiting?.signal} onToggle={(name) => setInputs((values) => ({ ...values, [name]: !values[name] }))} /><SignalGroup title="DIGITAL OUTPUTS" signals={outputs} enabledSignals={["doGripper"]} onToggle={() => setGripperOutput(!outputs.doGripper)} /></div></div>
-    {contextMenu && <div className="context-menu" style={{ left: contextMenu.x, top: contextMenu.y }} onContextMenu={(event) => event.preventDefault()}>{contextMenu.type === "target" ? <><b>{contextMenu.target}</b><button disabled={!customTargets.includes(contextMenu.target)} onClick={() => removeTarget(contextMenu.target)}>Remove point</button>{!customTargets.includes(contextMenu.target) && <small>Wbudowany punkt nie moze zostac usuniety.</small>}</> : <><b>{(() => { const idx = blocks.findIndex((b) => b.id === contextMenu.id); const b = blocks[idx]; return `Block #${idx + 1}${b ? ` [${b.position.map((v) => Math.round(v)).join(", ")}]` : ""}`; })()}</b><button onClick={() => removeBlock(contextMenu.id)}>Remove block</button></>}</div>}
+    {contextMenu && (
+      <div
+        className="context-menu"
+        style={{ left: contextMenu.x, top: contextMenu.y }}
+        onContextMenu={(event) => event.preventDefault()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {contextMenu.type === "target" ? (
+          <>
+            <b>{contextMenu.target}</b>
+            {targetPositions[contextMenu.target] && (
+              <small>
+                [{targetPositions[contextMenu.target].map((v) => Math.round(v)).join(", ")}] mm
+              </small>
+            )}
+            <button onClick={() => removeTarget(contextMenu.target)}>Usuń punkt</button>
+            <button className="secondary" onClick={() => setContextMenu(undefined)}>
+              Anuluj
+            </button>
+          </>
+        ) : (
+          <>
+            <b>
+              {(() => {
+                const idx = blocks.findIndex((b) => b.id === contextMenu.id);
+                const b = blocks[idx];
+                return `Block #${idx + 1}${
+                  b ? ` [${b.position.map((v) => Math.round(v)).join(", ")}]` : ""
+                }`;
+              })()}
+            </b>
+            <button onClick={() => removeBlock(contextMenu.id)}>Usuń blok</button>
+            <button className="secondary" onClick={() => setContextMenu(undefined)}>
+              Anuluj
+            </button>
+          </>
+        )}
+      </div>
+    )}
     {newTargetPoint && <div className="target-dialog-backdrop" onMouseDown={() => setNewTargetPoint(undefined)}><div className="target-dialog" role="dialog" aria-modal="true" aria-label="Dodaj punkt" onMouseDown={(event) => event.stopPropagation()}><b>Add point at TCP</b><small>[{newTargetPoint.map((value) => Math.round(value)).join(", ")}] mm</small><label>Name<input autoFocus value={targetName} onChange={(event) => setTargetName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") createTarget(); if (event.key === "Escape") setNewTargetPoint(undefined); }} placeholder="pCustom" /></label><div><button onClick={() => setNewTargetPoint(undefined)}>Cancel</button><button className="confirm" onClick={createTarget}>Add point</button></div></div></div>}
     </section>
   </main>;

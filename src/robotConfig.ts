@@ -30,6 +30,7 @@ export type SceneSnapshot = {
   targets: Record<string, [number, number, number]>;
   customTargets: string[];
   tcp: [number, number, number];
+  tcpPitch?: number;
   tool: "pen" | "gripper";
   showTable: boolean;
   tablePosition: [number, number];

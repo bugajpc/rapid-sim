@@ -22,6 +22,7 @@ export type StudentProject = {
   tablePosition?: [number, number];
   blocks?: BlockItem[];
   tcp?: [number, number, number];
+  tcpPitch?: number;
 };
 export type ExecutionStatus = "Ready" | "Running" | "Paused" | "Waiting for DI" | "Completed" | "Error";
 export type Command =
@@ -180,6 +181,41 @@ ENDMODULE`,
         MoveL pGripRetreat, v100, fine, tGripper;
         MoveJ pHome, v200, fine, tGripper;
         TPWrite "Blok odlozony";
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "procedures",
+    title: "Podprogramy i procedury",
+    topic: "Struktura programu",
+    summary: "Modularyzacja programu za pomoca wlasnych procedur PROC wywolywanych w main.",
+    code: `MODULE MainModule
+
+    PROC PobierzDetal()
+        TPWrite "Pobieranie detalu ze stacji...";
+        MoveL pGripPick, v100, fine, tGripper;
+        Set doGripper;
+        WaitTime 0.5;
+        MoveL pGripApproach, v100, fine, tGripper;
+    ENDPROC
+
+    PROC OdlozDetal()
+        TPWrite "Odkladanie detalu do gniazda...";
+        MoveJ pGripRetreat, v200, fine, tGripper;
+        MoveL pGripPlace, v100, fine, tGripper;
+        Reset doGripper;
+        WaitTime 0.5;
+        MoveL pGripRetreat, v100, fine, tGripper;
+    ENDPROC
+
+    PROC main()
+        TPWrite "Start programu glownego";
+        MoveJ pHome, v200, fine, tGripper;
+        PobierzDetal;
+        OdlozDetal;
+        MoveJ pHome, v200, fine, tGripper;
+        TPWrite "Cykl procedur zakonczony";
     ENDPROC
 
 ENDMODULE`,
@@ -583,74 +619,185 @@ function removeComment(source: string) {
   return source;
 }
 
+type ProcedureDefinition = {
+  name: string;
+  startLine: number;
+  body: { text: string; line: number }[];
+};
+
 export function compile(
   code: string,
   targetLibrary: Record<string, [number, number, number]> = targets
 ): { commands: Command[]; error?: string; errorLine?: number } {
-  const commands: Command[] = [];
   const lines = code.split("\n");
-  let inMain = false;
-  let sawMain = false;
+  const procedures = new Map<string, ProcedureDefinition>();
+  let currentProc: ProcedureDefinition | null = null;
 
+  // Pass 1: Parse module structure and collect procedures
   for (let index = 0; index < lines.length; index += 1) {
-    const line = index + 1;
+    const lineNum = index + 1;
     const source = removeComment(lines[index]).trim();
     if (!source) continue;
-    if (/^PROC\s+main\s*\(/i.test(source)) {
-      inMain = true;
-      sawMain = true;
-      continue;
-    }
-    if (/^ENDPROC/i.test(source)) {
-      inMain = false;
-      continue;
-    }
-    if (!inMain || /^(MODULE|ENDMODULE|PROC|CONST|VAR|PERS)\b/i.test(source)) continue;
 
-    let match: RegExpMatchArray | null;
-    if ((match = source.match(/^TPWrite\s+"(.*)"\s*;?$/i))) {
-      commands.push({ type: "log", text: match[1], line });
-    } else if ((match = source.match(/^(MoveJ|MoveL)\s+(\w+)/i))) {
-      const rawTarget = match[2];
-      const target = findTargetKey(targetLibrary, rawTarget);
-      if (!target) return { commands, error: `Linia ${line}: nieznany robtarget „${rawTarget}”.`, errorLine: line };
-      commands.push({ type: "move", kind: match[1].toUpperCase() === "MOVEJ" ? "MoveJ" : "MoveL", target, line });
-    } else if ((match = source.match(/^MoveC\s+(\w+)\s*,\s*(\w+)/i))) {
-      const rawVia = match[1];
-      const rawTarget = match[2];
-      const via = findTargetKey(targetLibrary, rawVia);
-      const target = findTargetKey(targetLibrary, rawTarget);
-      if (!via) return { commands, error: `Linia ${line}: nieznany robtarget „${rawVia}”.`, errorLine: line };
-      if (!target) return { commands, error: `Linia ${line}: nieznany robtarget „${rawTarget}”.`, errorLine: line };
-      commands.push({ type: "move", kind: "MoveC", via, target, line });
-    } else if ((match = source.match(/^(SetDO)\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
-      const signal = findOutputName(match[2]);
-      if (!signal) return { commands, error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
-      commands.push({ type: "output", signal, value: match[3] === "1", line });
-    } else if ((match = source.match(/^(Set|Reset|ResetDO)\s+(\w+)/i))) {
-      const signal = findOutputName(match[2]);
-      if (!signal) return { commands, error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
-      const isSet = /^Set$/i.test(match[1]);
-      commands.push({ type: "output", signal, value: isSet, line });
-    } else if ((match = source.match(/^WaitDI\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
-      const signal = findInputName(match[1]);
-      if (!signal) return { commands, error: `Linia ${line}: wejscie „${match[1]}” nie jest skonfigurowane.`, errorLine: line };
-      commands.push({ type: "waitInput", signal, value: match[2] === "1", line });
-    } else if ((match = source.match(/^WaitTime\s+([\d.]+)/i))) {
-      commands.push({ type: "wait", seconds: Number(match[1]), line });
-    } else if ((match = source.match(/^Incr\s+(\w+)/i))) {
-      commands.push({ type: "increment", variable: match[1], line });
-    } else if ((match = source.match(/^Clear\s+(\w+)/i))) {
-      commands.push({ type: "clear", variable: match[1], line });
-    } else if (/^Stop\s*;?$/i.test(source)) {
-      commands.push({ type: "stop", line });
-    } else if (/^(IF|ELSE|ENDIF|WHILE|ENDWHILE|FOR|ENDFOR|TEST|CASE|DEFAULT|ENDTEST|TPErase)/i.test(source)) {
-      return { commands, error: `Linia ${line}: ta struktura RAPID nie jest jeszcze wykonywalna w wersji edukacyjnej.`, errorLine: line };
-    } else {
-      return { commands, error: `Linia ${line}: nieobslugiwana instrukcja „${source.replace(/;$/, "")}”.`, errorLine: line };
+    // Module header / footer
+    if (/^MODULE\b/i.test(source) || /^ENDMODULE\b/i.test(source)) {
+      continue;
     }
+
+    // Procedure header: PROC name() or PROC name
+    const procStart = source.match(/^PROC\s+([A-Za-z_]\w*)\s*(?:\(\s*\))?\s*$/i);
+    if (procStart) {
+      if (currentProc) {
+        return {
+          commands: [],
+          error: `Linia ${lineNum}: Zagnieżdżone deklaracje procedur nie są dozwolone w RAPID. Brak ENDPROC dla „${currentProc.name}”.`,
+          errorLine: lineNum,
+        };
+      }
+      const rawName = procStart[1];
+      const lowerName = rawName.toLowerCase();
+      if (procedures.has(lowerName)) {
+        return {
+          commands: [],
+          error: `Linia ${lineNum}: Zduplikowana deklaracja procedury „${rawName}”.`,
+          errorLine: lineNum,
+        };
+      }
+      currentProc = { name: rawName, startLine: lineNum, body: [] };
+      procedures.set(lowerName, currentProc);
+      continue;
+    }
+
+    // Procedure end
+    if (/^ENDPROC\b/i.test(source)) {
+      if (!currentProc) {
+        return {
+          commands: [],
+          error: `Linia ${lineNum}: ENDPROC bez odpowiadającej deklaracji PROC.`,
+          errorLine: lineNum,
+        };
+      }
+      currentProc = null;
+      continue;
+    }
+
+    // Outside of any procedure
+    if (!currentProc) {
+      if (/^(CONST|VAR|PERS)\b/i.test(source)) {
+        continue;
+      }
+      return {
+        commands: [],
+        error: `Linia ${lineNum}: Instrukcja „${source.replace(/;$/, "")}” poza wnętrzem procedury.`,
+        errorLine: lineNum,
+      };
+    }
+
+    // Inside a procedure
+    currentProc.body.push({ text: source, line: lineNum });
   }
-  if (!sawMain) return { commands, error: "Brak procedury PROC main().", errorLine: 1 };
+
+  if (currentProc) {
+    return {
+      commands: [],
+      error: `Linia ${currentProc.startLine}: Brak zamknięcia ENDPROC dla procedury „${currentProc.name}”.`,
+      errorLine: currentProc.startLine,
+    };
+  }
+
+  // Pass 2: Find main entry point
+  const mainProc = procedures.get("main");
+  if (!mainProc) {
+    return { commands: [], error: "Brak procedury głównej PROC main().", errorLine: 1 };
+  }
+
+  const commands: Command[] = [];
+
+  // Recursive procedure compiler with call stack and cycle detection
+  function compileProc(proc: ProcedureDefinition, callStack: string[] = []): { error?: string; errorLine?: number } | null {
+    const procKey = proc.name.toLowerCase();
+    if (callStack.includes(procKey)) {
+      const chain = [...callStack.map((k) => procedures.get(k)?.name || k), proc.name].join(" -> ");
+      return {
+        error: `Wykryto zapętlenie wywołań procedur (rekurencja): ${chain}.`,
+        errorLine: proc.startLine,
+      };
+    }
+    if (callStack.length > 50) {
+      return {
+        error: `Przekroczono maksymalną głębokość wywołań procedur (50).`,
+        errorLine: proc.startLine,
+      };
+    }
+
+    const currentStack = [...callStack, procKey];
+
+    for (const item of proc.body) {
+      const { text: source, line } = item;
+      if (/^(CONST|VAR|PERS)\b/i.test(source)) continue;
+
+      let match: RegExpMatchArray | null;
+      if ((match = source.match(/^TPWrite\s+"(.*)"\s*;?$/i))) {
+        commands.push({ type: "log", text: match[1], line });
+      } else if ((match = source.match(/^(MoveJ|MoveL)\s+(\w+)/i))) {
+        const rawTarget = match[2];
+        const target = findTargetKey(targetLibrary, rawTarget);
+        if (!target) return { error: `Linia ${line}: nieznany robtarget „${rawTarget}”.`, errorLine: line };
+        commands.push({ type: "move", kind: match[1].toUpperCase() === "MOVEJ" ? "MoveJ" : "MoveL", target, line });
+      } else if ((match = source.match(/^MoveC\s+(\w+)\s*,\s*(\w+)/i))) {
+        const rawVia = match[1];
+        const rawTarget = match[2];
+        const via = findTargetKey(targetLibrary, rawVia);
+        const target = findTargetKey(targetLibrary, rawTarget);
+        if (!via) return { error: `Linia ${line}: nieznany robtarget „${rawVia}”.`, errorLine: line };
+        if (!target) return { error: `Linia ${line}: nieznany robtarget „${rawTarget}”.`, errorLine: line };
+        commands.push({ type: "move", kind: "MoveC", via, target, line });
+      } else if ((match = source.match(/^(SetDO)\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
+        const signal = findOutputName(match[2]);
+        if (!signal) return { error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
+        commands.push({ type: "output", signal, value: match[3] === "1", line });
+      } else if ((match = source.match(/^(Set|Reset|ResetDO)\s+(\w+)/i))) {
+        const signal = findOutputName(match[2]);
+        if (!signal) return { error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
+        const isSet = /^Set$/i.test(match[1]);
+        commands.push({ type: "output", signal, value: isSet, line });
+      } else if ((match = source.match(/^WaitDI\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
+        const signal = findInputName(match[1]);
+        if (!signal) return { error: `Linia ${line}: wejscie „${match[1]}” nie jest skonfigurowane.`, errorLine: line };
+        commands.push({ type: "waitInput", signal, value: match[2] === "1", line });
+      } else if ((match = source.match(/^WaitTime\s+([\d.]+)/i))) {
+        commands.push({ type: "wait", seconds: Number(match[1]), line });
+      } else if ((match = source.match(/^Incr\s+(\w+)/i))) {
+        commands.push({ type: "increment", variable: match[1], line });
+      } else if ((match = source.match(/^Clear\s+(\w+)/i))) {
+        commands.push({ type: "clear", variable: match[1], line });
+      } else if (/^Stop\s*;?$/i.test(source)) {
+        commands.push({ type: "stop", line });
+      } else if (/^(IF|ELSE|ENDIF|WHILE|ENDWHILE|FOR|ENDFOR|TEST|CASE|DEFAULT|ENDTEST|TPErase)/i.test(source)) {
+        return { error: `Linia ${line}: ta struktura RAPID nie jest jeszcze wykonywalna w wersji edukacyjnej.`, errorLine: line };
+      } else {
+        // Procedure Call: name; or name(); or name
+        const callMatch = source.match(/^([A-Za-z_]\w*)\s*(?:\(\s*\))?\s*;?$/i);
+        if (callMatch) {
+          const calledName = callMatch[1];
+          const calledProc = procedures.get(calledName.toLowerCase());
+          if (calledProc) {
+            const res = compileProc(calledProc, currentStack);
+            if (res?.error) return res;
+            continue;
+          }
+        }
+        return { error: `Linia ${line}: nieobslugiwana instrukcja lub nieznana procedura „${source.replace(/;$/, "")}”.`, errorLine: line };
+      }
+    }
+    return null;
+  }
+
+  const result = compileProc(mainProc);
+  if (result?.error) {
+    return { commands: [], error: result.error, errorLine: result.errorLine };
+  }
+
   return { commands };
 }
 
