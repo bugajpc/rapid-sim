@@ -7,14 +7,21 @@ export type Example = {
 };
 
 export type SignalMap = Record<string, boolean>;
+import type { BlockItem } from "./robotConfig";
+
 export type ToolKind = "pen" | "gripper";
 export type StudentProject = {
-  version: 1;
+  version: 1 | 2;
   name: string;
   code: string;
   targets: Record<string, [number, number, number]>;
   customTargets: string[];
   savedAt: string;
+  tool?: ToolKind;
+  showTable?: boolean;
+  tablePosition?: [number, number];
+  blocks?: BlockItem[];
+  tcp?: [number, number, number];
 };
 export type ExecutionStatus = "Ready" | "Running" | "Paused" | "Waiting for DI" | "Completed" | "Error";
 export type Command =
@@ -179,6 +186,367 @@ ENDMODULE`,
   },
 ];
 
+export type Task = {
+  id: string;
+  title: string;
+  category: "podstawowe" | "elm08";
+  topic: string;
+  summary: string;
+  tips: string[];
+  tool: ToolKind;
+  starterCode: string;
+};
+
+export const tasks: Task[] = [
+  // --- 5 ZADAŃ PODSTAWOWYCH / TRENINGOWYCH ---
+  {
+    id: "task-basic-1",
+    title: "1. Komunikaty i bazowanie",
+    category: "podstawowe",
+    topic: "Podstawy RAPID",
+    summary: "Napisz program, który po uruchomieniu wyświetli na panelu operatora komunikat powitalny \"Robot gotowy do pracy\", przemieści ramię robota ruchem MoveJ do pozycji bazowej pHome z prędkością v200 i potwierdzi osiągnięcie celu drugim komunikatem \"Pozycja bazowa osiagnieta\".",
+    tool: "pen",
+    tips: [
+      "Użyj instrukcji TPWrite \"twoj tekst\"; do wypisywania wiadomości w konsoli.",
+      "Składnia ruchu osiowego: MoveJ punkt, predkosc, strefa, narzedzie; (np. MoveJ pHome, v200, fine, tPen;).",
+      "Pamiętaj o średnikach na końcu każdej instrukcji."
+    ],
+    starterCode: `MODULE MainModule
+
+    PROC main()
+        ! Krok 1: Wypisz na panelu TPWrite komunikat "Robot gotowy do pracy"
+        
+        ! Krok 2: Wykonaj ruch MoveJ do punktu bazowego pHome z narzedziem tPen
+        
+        ! Krok 3: Wypisz komunikat "Pozycja bazowa osiagnieta"
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-basic-2",
+    title: "2. Rysowanie ścieżki liniowej",
+    category: "podstawowe",
+    topic: "Ruch liniowy MoveL",
+    summary: "Ramię robota z narzędziem tPen ma narysować zamknięty kontur kontrolny kwadratu. Rozpocznij od pHome, zjedź do pSquareStart, wykonaj ruchy liniowe MoveL po kolejnych wierzchołkach: pSquareA -> pSquareB -> pSquareC -> pSquareD -> pSquareA, a następnie powróć do pHome.",
+    tool: "pen",
+    tips: [
+      "Do pierwszego wierzchołka dojedź ruchem MoveJ, a po bokach kwadratu poruszaj się ruchem MoveL.",
+      "Parametry ruchu: punkt docelowy, prędkość (np. v100), strefa zatrzymania (fine) oraz narzędzie (tPen).",
+      "Obserwuj ślad TCP trail w oknie symulacji 3D, aby zweryfikować ciągłość linii."
+    ],
+    starterCode: `MODULE MainModule
+
+    PROC main()
+        ! Krok 1: Dojazd z pHome do punktu pSquareStart (MoveJ)
+        
+        ! Krok 2: Liniowy przejazd przez kolejne wierzcholki kwadratu (MoveL)
+        ! pSquareA -> pSquareB -> pSquareC -> pSquareD -> pSquareA
+        
+        ! Krok 3: Powrot do pozycji wyjsciowej pHome (MoveJ)
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-basic-3",
+    title: "3. Licznik wyprodukowanych sztuk",
+    category: "podstawowe",
+    topic: "Zmienne numeryczne i Incr",
+    summary: "Zadeklaruj zmienną numeryczną nPartCounter o wartości początkowej 0. Zasymuluj zliczanie 3 wykonanych operacji w punktach pSquareA, pSquareB i pSquareC. Po osiągnięciu każdego punktu zwiększ licznik instrukcją Incr i wyświetl powiadomienie. Na koniec wyczyść licznik instrukcją Clear.",
+    tool: "pen",
+    tips: [
+      "Zmienną deklaruje się przed procedurą main słowem kluczowym: VAR num nPartCounter := 0;",
+      "Inkrementacja wartości zmiennej: Incr nPartCounter;",
+      "Zerowanie zmiennej: Clear nPartCounter;"
+    ],
+    starterCode: `MODULE MainModule
+    VAR num nPartCounter := 0;
+
+    PROC main()
+        ! Krok 1: Przejazd do pSquareA, zwiekszenie licznika (Incr) i powiadomienie TPWrite
+        
+        ! Krok 2: Przejazd do pSquareB, zwiekszenie licznika (Incr) i powiadomienie TPWrite
+        
+        ! Krok 3: Przejazd do pSquareC, zwiekszenie licznika (Incr) i powiadomienie TPWrite
+        
+        ! Krok 4: Wypisanie komunikatu o zakonczeniu partii i wyczyszczenie licznika (Clear)
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-basic-4",
+    title: "4. Przenoszenie detalu chwytakiem",
+    category: "podstawowe",
+    topic: "Narzędzie Gripper i I/O",
+    summary: "Wybierz narzędzie Gripper. Zaprogramuj cykl pobrania bloku ze stołu z pozycji pGripPick i odłożenia go w punkcie pGripPlace. Uwzględnij punkty dojazdowe pGripApproach i pGripRetreat, aby uniknąć kolizji z krawędzią stołu.",
+    tool: "gripper",
+    tips: [
+      "Zamknięcie chwytaka realizuje instrukcja Set doGripper; (lub SetDO doGripper, 1;).",
+      "Pamiętaj o dodaniu opóźnienia WaitTime 0.5; po zamknięciu i otwarciu chwytaka, aby mechanizm zdążył zadziałać.",
+      "Zwolnienie detalu realizuje Reset doGripper;."
+    ],
+    starterCode: `MODULE MainModule
+
+    PROC main()
+        ! Krok 1: Dojazd nad detal do punktu pGripApproach (narzedzie tGripper)
+        
+        ! Krok 2: Zjazd pionowy do pGripPick, zamkniecie chwytaka (Set doGripper) i odczekanie 0.5s
+        
+        ! Krok 3: Podniesienie detalu do pGripApproach
+        
+        ! Krok 4: Przejazd tranzytowy do pGripRetreat
+        
+        ! Krok 5: Zjazd do pGripPlace, otwarcie chwytaka (Reset doGripper) i odczekanie 0.5s
+        
+        ! Krok 6: Wycofanie do pGripRetreat i powrot do pHome
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-basic-5",
+    title: "5. Synchronizacja z operatorem (WaitDI)",
+    category: "podstawowe",
+    topic: "Cyfrowe wejścia/wyjścia",
+    summary: "Robot w pozycji pHome oczekuje na sygnał startu od operatora (diStart = 1). Po odebraniu sygnału robot załącza sygnalizację pracy doBusy, wykonuje ruch inspekcyjny do pCircleStart, odczekuje 1 sekundę czasu technologicznego, wraca do pHome, wyłącza doBusy i wystawia sygnał doComplete.",
+    tool: "pen",
+    tips: [
+      "Do wstrzymania programu do momentu podania sygnału użyj WaitDI diStart, 1;.",
+      "Podczas działania programu kliknij przycisk diStart w zakładce SIGNALS na dolnym pasku.",
+      "Sterowanie lampkami wyjściowymi: Set nazwaSygnalu; oraz Reset nazwaSygnalu;."
+    ],
+    starterCode: `MODULE MainModule
+
+    PROC main()
+        ! Krok 1: Wypisz komunikat z prosba o wcisniecie diStart
+        
+        ! Krok 2: Oczekuj na stan wysoki wejscia diStart (WaitDI)
+        
+        ! Krok 3: Zasygnalizuj prace (Set doBusy) i przemiesc robota do pCircleStart
+        
+        ! Krok 4: Odczekaj 1 sekunde czasu technologicznego (WaitTime)
+        
+        ! Krok 5: Powrot do pHome, wylaczenie doBusy i zalaczenie doComplete
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+
+  // --- 5 ZADAŃ EGZAMINACYJNYCH ELM.08 (TECHNIK ROBOTYK) ---
+  {
+    id: "task-elm08-1",
+    title: "ELM.08 Zadanie 1: Gniazdo paletyzacji z kontrolą czujnika",
+    category: "elm08",
+    topic: "Kwalifikacja ELM.08 · Egzamin praktyczny",
+    summary: "Zadanie egzaminacyjne CKE: Zrobotyzowane gniazdo paletyzacji. Przed pobraniem detalu ramię musi sprawdzić czujnik obecności diPartPresent, zasygnalizować stan zajętości doBusy, przenieść detal z pGripPick do pGripPlace z zachowaniem punktów dojazdu i potwierdzić koniec cyklu sygnałem doComplete.",
+    tool: "gripper",
+    tips: [
+      "Dokładnie przeczytaj kolejność operacji: warunek początkowy -> sprawdzenie czujnika -> sygnalizacja -> transfer -> sygnalizacja końcowa.",
+      "Upewnij się, że w panelu SIGNALS włączysz diPartPresent, gdy program przejdzie w stan oczekiwania.",
+      "Wymagane jest zachowanie płynności ruchu oraz czasów technologicznych 0.5 s po każdej zmianie stanu chwytaka."
+    ],
+    starterCode: `MODULE MainModule
+
+    ! =================================================================
+    ! ARKUSZ EGZAMINACYJNY ELM.08 - ZADANIE 1
+    ! Stanowisko zrobotyzowanej paletyzacji i kontroli obecnosci detalu
+    ! =================================================================
+
+    PROC main()
+        ! 1. Warunki poczatkowe: zresetuj doBusy i doComplete, ustaw doReady
+        
+        ! 2. Przemieść robota do pozycji bazowej pHome (MoveJ, v200, fine, tGripper)
+        
+        ! 3. Oczekuj na sygnal obecnosci detalu z czujnika: diPartPresent = 1
+        
+        ! 4. Wyzeruj doReady, załacz doBusy, wypisz "Pobieranie detalu"
+        
+        ! 5. Dojazd nad detal: pGripApproach (MoveJ, v200) -> pGripPick (MoveL, v100)
+        
+        ! 6. Zamkniecie chwytaka (Set doGripper), odczekaj 0.5s, podniesienie do pGripApproach
+        
+        ! 7. Przejazd do strefy odkladczej: pGripRetreat (MoveJ) -> pGripPlace (MoveL)
+        
+        ! 8. Otwarcie chwytaka (Reset doGripper), odczekaj 0.5s, wycofanie do pGripRetreat
+        
+        ! 9. Powrot do pHome, wylaczenie doBusy, wystawienie impulsu doComplete
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-elm08-2",
+    title: "ELM.08 Zadanie 2: Obróbka konturowa z blokadą bezpieczeństwa",
+    category: "elm08",
+    topic: "Kwalifikacja ELM.08 · Egzamin praktyczny",
+    summary: "Zadanie egzaminacyjne CKE: Zrobotyzowane stanowisko obróbki krawędzi detalu. Przed uruchomieniem cyklu program musi zweryfikować obwód bezpieczeństwa (diSafetyOk = 1) oraz przycisk startu (diStart = 1), po czym wykonać obróbkę obrysu kwadratowego narzędziem tPen.",
+    tool: "pen",
+    tips: [
+      "Czytanie ze zrozumieniem: program nie może ruszyć, dopóki obwód bezpieczeństwa diSafetyOk oraz przycisk diStart nie osiągną stanu wysokiego (1).",
+      "Prędkość najazdu do punktu początkowego wynosi v200, natomiast prędkość obróbki liniowej MoveL wynosi v100.",
+      "Po zakończeniu obróbki robot musi bezpiecznie wyjechać do pSquareStart przed powrotem do pHome."
+    ],
+    starterCode: `MODULE MainModule
+
+    ! =================================================================
+    ! ARKUSZ EGZAMINACYJNY ELM.08 - ZADANIE 2
+    ! Stanowisko obrobki konturowej z dwuetapowym warunkiem startu
+    ! =================================================================
+
+    PROC main()
+        ! 1. Sprawdz obwod bezpieczenstwa: oczekuj na diSafetyOk = 1
+        
+        ! 2. Wypisz komunikat "Obwod bezpieczenstwa OK. Oczekiwanie na start"
+        
+        ! 3. Oczekuj na wcisniecie przycisku startu przez operatora: diStart = 1
+        
+        ! 4. Załacz sygnalizator pracy doBusy, zgas doReady
+        
+        ! 5. Dojedz z pHome do pSquareStart (MoveJ, v200, fine, tPen)
+        
+        ! 6. Wykonaj obrobke liniowa MoveL (v100) po sciezce:
+        !    pSquareA -> pSquareB -> pSquareC -> pSquareD -> pSquareA
+        
+        ! 7. Odjedz pionowo do pSquareStart, powroc do pHome
+        
+        ! 8. Wyzeruj doBusy, załacz doComplete, wypisz "Koniec cyklu obrobki"
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-elm08-3",
+    title: "ELM.08 Zadanie 3: Skanowanie łukowe MoveC i licznik partii",
+    category: "elm08",
+    topic: "Kwalifikacja ELM.08 · Egzamin praktyczny",
+    summary: "Zadanie egzaminacyjne CKE: Automatyczna kontrola wymiarowa okręgu z wykorzystaniem ruchów kołowych MoveC. Ramię przemieszcza głowicę pomiarową tPen po okręgu testowym, rejestruje zbadaną sztukę w liczniku nProducedParts i wystawia sygnał zakończenia.",
+    tool: "pen",
+    tips: [
+      "Ruch po okręgu wymaga dwóch instrukcji MoveC: pierwsza od pCircleA przez pCircleB do pCircleC, druga od pCircleC przez pCircleD do pCircleA.",
+      "Składnia: MoveC punkt_posredni, punkt_koncowy, v100, fine, tPen;.",
+      "Pamiętaj o deklaracji zmiennej VAR num nProducedParts := 0; na początku modułu."
+    ],
+    starterCode: `MODULE MainModule
+    VAR num nProducedParts := 0;
+
+    ! =================================================================
+    ! ARKUSZ EGZAMINACYJNY ELM.08 - ZADANIE 3
+    ! Pomiar geometrii luku (MoveC) i ewidencja ilosciowa partii
+    ! =================================================================
+
+    PROC main()
+        ! 1. Wyzeruj wyjscia technologiczne, przemiesc robota do pHome
+        
+        ! 2. Dojedz do punktu rozpoczecia skanowania pCircleStart (MoveJ)
+        
+        ! 3. Zjedz pionowo do pCircleA, załacz sygnalizator doBusy
+        
+        ! 4. Wykonaj ruch po pierwszym polokregu: MoveC pCircleB, pCircleC...
+        
+        ! 5. Wykonaj ruch po drugim polokregu: MoveC pCircleD, pCircleA...
+        
+        ! 6. Odjedz pionowo do pCircleStart, powroc do pHome
+        
+        ! 7. Zwieksz licznik detali (Incr nProducedParts) i wypisz jego stan
+        
+        ! 8. Wylacz doBusy, załacz sygnal doComplete
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-elm08-4",
+    title: "ELM.08 Zadanie 4: Sekwencja resetu i przezbrajania stanowiska",
+    category: "elm08",
+    topic: "Kwalifikacja ELM.08 · Egzamin praktyczny",
+    summary: "Zadanie egzaminacyjne CKE: Procedura przygotowawcza i obsługa przycisku resetu. Program musi najpierw wymusić naciśnięcie diReset przez operatora, wyzerować stan wykonawczy, dokonać zbazowania ramienia i dopiero wtedy umożliwić rozpoczęcie cyklu pobierania detalu po wciśnięciu diStart.",
+    tool: "gripper",
+    tips: [
+      "Zwróć uwagę na logikę sekwencji: najpierw faza resetu (diReset), potem faza gotowości (doReady), a dopiero na końcu faza pracy po sygnale diStart.",
+      "Do sterowania chwytakiem możesz użyć standardowych instrukcji Set doGripper / Reset doGripper lub SetDO doGripper, 1 / ResetDO doGripper.",
+      "Zadbaj o właściwe punkty dojazdu pGripApproach i pGripRetreat."
+    ],
+    starterCode: `MODULE MainModule
+
+    ! =================================================================
+    ! ARKUSZ EGZAMINACYJNY ELM.08 - ZADANIE 4
+    ! Procedura bezpiecznego zerowania, bazowania i startu cyklu
+    ! =================================================================
+
+    PROC main()
+        ! 1. Wypisz komunikat "Wymagany reset stanowiska (wcisnij diReset)"
+        
+        ! 2. Oczekuj na sygnał resetu: diReset = 1 (WaitDI)
+        
+        ! 3. Wyzeruj wszystkie wyjscia (doBusy, doComplete, doGripper)
+        
+        ! 4. Przemieść ramie do pozycji bazowej pHome (MoveJ, v200, fine, tGripper)
+        
+        ! 5. Załacz sygnal gotowosci: Set doReady, wypisz "Stanowisko gotowe do pracy"
+        
+        ! 6. Oczekuj na sygnał startu cyklu produkcyjnego: diStart = 1
+        
+        ! 7. Zgas doReady, załacz doBusy, wykonaj pelny cykl pobrania z pGripPick
+        !    oraz odlozenia do pGripPlace (z zachowaniem podejsc i odjazdow)
+        
+        ! 8. Powrot do pHome, wylaczenie doBusy, wystawienie doComplete
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+  {
+    id: "task-elm08-5",
+    title: "ELM.08 Zadanie 5: Transfer detalu z inspekcją pośrednią",
+    category: "elm08",
+    topic: "Kwalifikacja ELM.08 · Egzamin praktyczny",
+    summary: "Zadanie egzaminacyjne CKE: Złożony cykl transportowy z buforem międzyoperacyjnym. Robot pobiera detal z gniazda pGripPick, przenosi go do stacji kontroli wizyjnej pPick, zatrzymuje detal w chwycie na czas inspekcji 1.0 s, po czym odstawia gotowy element do gniazda końcowego pGripPlace.",
+    tool: "gripper",
+    tips: [
+      "W punkcie stacji pośredniej pPick nie otwieraj chwytaka! Zastosuj WaitTime 1.0; przy zaciśniętych szczękach chwytaka.",
+      "Przed startem programu wymagane jest jednoczesne potwierdzenie diSafetyOk = 1 oraz diStart = 1.",
+      "Wypisuj w oknie konsoli poszczególne etapy cyklu, aby operator widział aktualny status gniazda."
+    ],
+    starterCode: `MODULE MainModule
+
+    ! =================================================================
+    ! ARKUSZ EGZAMINACYJNY ELM.08 - ZADANIE 5
+    ! Transport dwuetapowy ze stacja kontroli wizyjnej w punkcie pPick
+    ! =================================================================
+
+    PROC main()
+        ! 1. Sygnalizuj gotowosc: Set doReady, zresetuj doBusy i doComplete
+        
+        ! 2. Oczekuj na spelnienie warunkow: diSafetyOk = 1 oraz diStart = 1
+        
+        ! 3. Zgas doReady, ustaw doBusy, wypisz "Rozpoczecie cyklu transportowego"
+        
+        ! 4. Pobierz detal ze stolu: dojazd pGripApproach -> zjazd pGripPick -> Set doGripper -> 0.5s -> powrot pGripApproach
+        
+        ! 5. Przetransportuj detal do punktu kontroli optycznej pPick (MoveJ, v200)
+        
+        ! 6. Wstrzymaj ruch na czas inspekcji optycznej 1.0s (detal pozostaje w chwytaku!)
+        
+        ! 7. Przemieść detal do strefy odkladczej: najazd pGripRetreat -> zjazd pGripPlace -> Reset doGripper -> 0.5s
+        
+        ! 8. Wycofanie do pGripRetreat, powrot do pHome, wylaczenie doBusy, wystawienie doComplete
+        
+    ENDPROC
+
+ENDMODULE`,
+  },
+];
+
 export const blankProjectCode = `MODULE MainModule
 
     PROC main()
@@ -187,8 +555,24 @@ export const blankProjectCode = `MODULE MainModule
 
 ENDMODULE`;
 
-const outputNames = new Set(["doReady", "doGripper", "doBusy", "doComplete"]);
-const inputNames = new Set(["diStart", "diPartPresent", "diReset", "diSafetyOk"]);
+const outputNames = ["doReady", "doGripper", "doBusy", "doComplete"];
+const inputNames = ["diStart", "diPartPresent", "diReset", "diSafetyOk"];
+
+export function findTargetKey(targetLibrary: Record<string, [number, number, number]>, name: string): string | undefined {
+  if (targetLibrary[name]) return name;
+  const lower = name.toLowerCase();
+  return Object.keys(targetLibrary).find((key) => key.toLowerCase() === lower);
+}
+
+export function findOutputName(name: string): string | undefined {
+  const lower = name.toLowerCase();
+  return outputNames.find((sig) => sig.toLowerCase() === lower);
+}
+
+export function findInputName(name: string): string | undefined {
+  const lower = name.toLowerCase();
+  return inputNames.find((sig) => sig.toLowerCase() === lower);
+}
 
 function removeComment(source: string) {
   let quoted = false;
@@ -199,7 +583,10 @@ function removeComment(source: string) {
   return source;
 }
 
-export function compile(code: string, targetLibrary: Record<string, [number, number, number]> = targets): { commands: Command[]; error?: string } {
+export function compile(
+  code: string,
+  targetLibrary: Record<string, [number, number, number]> = targets
+): { commands: Command[]; error?: string; errorLine?: number } {
   const commands: Command[] = [];
   const lines = code.split("\n");
   let inMain = false;
@@ -224,22 +611,30 @@ export function compile(code: string, targetLibrary: Record<string, [number, num
     if ((match = source.match(/^TPWrite\s+"(.*)"\s*;?$/i))) {
       commands.push({ type: "log", text: match[1], line });
     } else if ((match = source.match(/^(MoveJ|MoveL)\s+(\w+)/i))) {
-      const target = match[2];
-      if (!targetLibrary[target]) return { commands, error: `Linia ${line}: nieznany robtarget „${target}”.` };
-      commands.push({ type: "move", kind: match[1] as "MoveJ" | "MoveL", target, line });
+      const rawTarget = match[2];
+      const target = findTargetKey(targetLibrary, rawTarget);
+      if (!target) return { commands, error: `Linia ${line}: nieznany robtarget „${rawTarget}”.`, errorLine: line };
+      commands.push({ type: "move", kind: match[1].toUpperCase() === "MOVEJ" ? "MoveJ" : "MoveL", target, line });
     } else if ((match = source.match(/^MoveC\s+(\w+)\s*,\s*(\w+)/i))) {
-      const via = match[1];
-      const target = match[2];
-      if (!targetLibrary[via]) return { commands, error: `Linia ${line}: nieznany robtarget „${via}”.` };
-      if (!targetLibrary[target]) return { commands, error: `Linia ${line}: nieznany robtarget „${target}”.` };
+      const rawVia = match[1];
+      const rawTarget = match[2];
+      const via = findTargetKey(targetLibrary, rawVia);
+      const target = findTargetKey(targetLibrary, rawTarget);
+      if (!via) return { commands, error: `Linia ${line}: nieznany robtarget „${rawVia}”.`, errorLine: line };
+      if (!target) return { commands, error: `Linia ${line}: nieznany robtarget „${rawTarget}”.`, errorLine: line };
       commands.push({ type: "move", kind: "MoveC", via, target, line });
-    } else if ((match = source.match(/^(Set|Reset)\s+(\w+)/i))) {
-      const signal = match[2];
-      if (!outputNames.has(signal)) return { commands, error: `Linia ${line}: wyjscie „${signal}” nie jest skonfigurowane.` };
-      commands.push({ type: "output", signal, value: match[1].toLowerCase() === "set", line });
+    } else if ((match = source.match(/^(SetDO)\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
+      const signal = findOutputName(match[2]);
+      if (!signal) return { commands, error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
+      commands.push({ type: "output", signal, value: match[3] === "1", line });
+    } else if ((match = source.match(/^(Set|Reset|ResetDO)\s+(\w+)/i))) {
+      const signal = findOutputName(match[2]);
+      if (!signal) return { commands, error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
+      const isSet = /^Set$/i.test(match[1]);
+      commands.push({ type: "output", signal, value: isSet, line });
     } else if ((match = source.match(/^WaitDI\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
-      const signal = match[1];
-      if (!inputNames.has(signal)) return { commands, error: `Linia ${line}: wejscie „${signal}” nie jest skonfigurowane.` };
+      const signal = findInputName(match[1]);
+      if (!signal) return { commands, error: `Linia ${line}: wejscie „${match[1]}” nie jest skonfigurowane.`, errorLine: line };
       commands.push({ type: "waitInput", signal, value: match[2] === "1", line });
     } else if ((match = source.match(/^WaitTime\s+([\d.]+)/i))) {
       commands.push({ type: "wait", seconds: Number(match[1]), line });
@@ -250,12 +645,12 @@ export function compile(code: string, targetLibrary: Record<string, [number, num
     } else if (/^Stop\s*;?$/i.test(source)) {
       commands.push({ type: "stop", line });
     } else if (/^(IF|ELSE|ENDIF|WHILE|ENDWHILE|FOR|ENDFOR|TEST|CASE|DEFAULT|ENDTEST|TPErase)/i.test(source)) {
-      return { commands, error: `Linia ${line}: ta struktura RAPID nie jest jeszcze wykonywalna w wersji edukacyjnej.` };
+      return { commands, error: `Linia ${line}: ta struktura RAPID nie jest jeszcze wykonywalna w wersji edukacyjnej.`, errorLine: line };
     } else {
-      return { commands, error: `Linia ${line}: nieobslugiwana instrukcja „${source.replace(/;$/, "")}”.` };
+      return { commands, error: `Linia ${line}: nieobslugiwana instrukcja „${source.replace(/;$/, "")}”.`, errorLine: line };
     }
   }
-  if (!sawMain) return { commands, error: "Brak procedury PROC main()." };
+  if (!sawMain) return { commands, error: "Brak procedury PROC main().", errorLine: 1 };
   return { commands };
 }
 
@@ -265,8 +660,11 @@ export function targetNamesInCode(code: string, targetLibrary: Record<string, [n
     const source = removeComment(line);
     const linearMotion = source.match(/^\s*Move(?:J|L)\s+(\w+)/i);
     const circularMotion = source.match(/^\s*MoveC\s+(\w+)\s*,\s*(\w+)/i);
-    for (const name of [linearMotion?.[1], circularMotion?.[1], circularMotion?.[2]]) {
-      if (name && targetLibrary[name]) names.add(name);
+    for (const rawName of [linearMotion?.[1], circularMotion?.[1], circularMotion?.[2]]) {
+      if (rawName) {
+        const canonical = findTargetKey(targetLibrary, rawName);
+        if (canonical) names.add(canonical);
+      }
     }
   }
   return [...names];

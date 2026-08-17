@@ -1,9 +1,9 @@
 // Dimensions in millimetres for the educational IRB 1090-inspired visual model.
 // They define a teaching workspace, not an ABB-certified kinematic specification.
 export const robotGeometry = {
-  shoulderHeight: 320,
-  upperArm: 250,
-  forearm: 180,
+  shoulderHeight: 350,
+  upperArm: 360,
+  forearm: 280,
   // Axis 4 wrist centre to the rendered pen tip. This must match the scene
   // geometry so the visible tool endpoint and commanded TCP coincide.
   wristAndTool: 150,
@@ -15,9 +15,58 @@ export const robotReach = {
   minimum: Math.abs(robotGeometry.upperArm - robotGeometry.forearm) + robotGeometry.wristAndTool,
   maximum: robotGeometry.upperArm + robotGeometry.forearm + robotGeometry.wristAndTool,
   // Keep lesson targets away from singular, folded, and fully stretched poses.
-  comfortableMinimum: 280,
-  comfortableMaximum: 550,
+  comfortableMinimum: 260,
+  comfortableMaximum: 740,
 } as const;
+
+export const defaultTablePosition: [number, number] = [0, 440];
+
+export type BlockItem = {
+  id: string;
+  position: [number, number, number];
+};
+
+export type SceneSnapshot = {
+  targets: Record<string, [number, number, number]>;
+  customTargets: string[];
+  tcp: [number, number, number];
+  tool: "pen" | "gripper";
+  showTable: boolean;
+  tablePosition: [number, number];
+  blocks: BlockItem[];
+};
+
+export const tableConfig = {
+  width: 680,
+  depth: 400,
+  minX: -340,
+  maxX: 340,
+  minY: 240,
+  maxY: 640,
+  topZ: 200,
+  plateThickness: 20,
+  rows: 4,
+  cols: 7,
+  holeRadius: 14,
+} as const;
+
+export function isOverTable(x: number, y: number, tableCenter: [number, number] = defaultTablePosition): boolean {
+  const halfWidth = tableConfig.width / 2;
+  const halfDepth = tableConfig.depth / 2;
+  return (
+    x >= tableCenter[0] - halfWidth &&
+    x <= tableCenter[0] + halfWidth &&
+    y >= tableCenter[1] - halfDepth &&
+    y <= tableCenter[1] + halfDepth
+  );
+}
+
+export function getFloorZ(x: number, y: number, hasTable: boolean, tableCenter: [number, number] = defaultTablePosition): number {
+  if (hasTable && isOverTable(x, y, tableCenter)) {
+    return tableConfig.topZ + 35;
+  }
+  return 35;
+}
 
 export const defaultTcp: [number, number, number] = [220, 340, 480];
 
