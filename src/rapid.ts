@@ -25,14 +25,28 @@ export type StudentProject = {
   tcpPitch?: number;
 };
 export type ExecutionStatus = "Ready" | "Running" | "Paused" | "Waiting for DI" | "Completed" | "Error";
+export type TPWriteParam = {
+  kind: "num" | "dnum" | "bool" | "pos" | "orient";
+  expr: string;
+};
+
+export type EvaluationContext = {
+  variables: Record<string, any>;
+  targetLibrary?: Record<string, [number, number, number]>;
+};
+
 export type Command =
-  | { type: "log"; text: string; line: number }
+  | { type: "log"; text?: string; textExpr?: string; params?: TPWriteParam[]; line: number }
   | { type: "move"; kind: "MoveJ" | "MoveL" | "MoveC"; target: string; via?: string; line: number }
   | { type: "output"; signal: string; value: boolean; line: number }
   | { type: "waitInput"; signal: string; value: boolean; line: number }
   | { type: "wait"; seconds: number; line: number }
-  | { type: "increment"; variable: string; line: number }
+  | { type: "increment"; variable: string; stepExpr?: string; line: number }
+  | { type: "decrement"; variable: string; stepExpr?: string; line: number }
   | { type: "clear"; variable: string; line: number }
+  | { type: "assign"; variable: string; expr: string; line: number }
+  | { type: "add"; variable: string; expr: string; line: number }
+  | { type: "tpErase"; line: number }
   | { type: "stop"; line: number };
 
 export const targets: Record<string, [number, number, number]> = {
@@ -619,6 +633,474 @@ function removeComment(source: string) {
   return source;
 }
 
+export function evaluateExpression(expr: string, context: EvaluationContext): any {
+  const trimmed = expr.trim();
+  if (!trimmed) return "";
+
+  // Tokenize
+  const tokens: Array<{ type: string; value: string }> = [];
+  let i = 0;
+  while (i < trimmed.length) {
+    const ch = trimmed[i];
+    if (/\s/.test(ch)) {
+      i++;
+      continue;
+    }
+    // String literal
+    if (ch === '"') {
+      let strVal = "";
+      i++; // skip opening quote
+      while (i < trimmed.length) {
+        if (trimmed[i] === '"') {
+          if (i + 1 < trimmed.length && trimmed[i + 1] === '"') {
+            strVal += '"';
+            i += 2;
+          } else {
+            i++; // skip closing quote
+            break;
+          }
+        } else {
+          strVal += trimmed[i];
+          i++;
+        }
+      }
+      tokens.push({ type: "STRING", value: strVal });
+      continue;
+    }
+    // Number literal (e.g. 123, 12.34, .5)
+    if (/\d/.test(ch) || (ch === "." && i + 1 < trimmed.length && /\d/.test(trimmed[i + 1]))) {
+      let numStr = "";
+      while (i < trimmed.length && /[\d.]/.test(trimmed[i])) {
+        numStr += trimmed[i];
+        i++;
+      }
+      tokens.push({ type: "NUMBER", value: numStr });
+      continue;
+    }
+    // Multi-char operators
+    const twoChars = trimmed.slice(i, i + 2);
+    if (twoChars === "<>" || twoChars === "<=" || twoChars === ">=" || twoChars === ":=") {
+      tokens.push({ type: "OPERATOR", value: twoChars });
+      i += 2;
+      continue;
+    }
+    // Single-char symbols / operators
+    if ("=<>+-*/()[],{}".includes(ch)) {
+      tokens.push({ type: "OPERATOR", value: ch });
+      i++;
+      continue;
+    }
+    // Identifiers & keywords
+    if (/[A-Za-z_]/.test(ch)) {
+      let ident = "";
+      while (i < trimmed.length && /[A-Za-z0-9_]/.test(trimmed[i])) {
+        ident += trimmed[i];
+        i++;
+      }
+      const upper = ident.toUpperCase();
+      if (upper === "TRUE") {
+        tokens.push({ type: "BOOLEAN", value: "TRUE" });
+      } else if (upper === "FALSE") {
+        tokens.push({ type: "BOOLEAN", value: "FALSE" });
+      } else if (["DIV", "MOD", "AND", "OR", "XOR", "NOT"].includes(upper)) {
+        tokens.push({ type: "KEYWORD_OP", value: upper });
+      } else {
+        tokens.push({ type: "IDENT", value: ident });
+      }
+      continue;
+    }
+    // Fallback single character
+    tokens.push({ type: "UNKNOWN", value: ch });
+    i++;
+  }
+
+  let pos = 0;
+  function peek() {
+    return tokens[pos];
+  }
+  function consume(expected?: string) {
+    const token = tokens[pos];
+    if (expected && (!token || (token.value !== expected && token.type !== expected))) {
+      // no match
+    }
+    pos++;
+    return token;
+  }
+
+  function parseOr(): any {
+    let left = parseAnd();
+    while (pos < tokens.length) {
+      const token = peek();
+      if (token && token.type === "KEYWORD_OP" && (token.value === "OR" || token.value === "XOR")) {
+        consume();
+        const right = parseAnd();
+        if (token.value === "OR") left = Boolean(left || right);
+        else left = Boolean(left !== right);
+      } else {
+        break;
+      }
+    }
+    return left;
+  }
+
+  function parseAnd(): any {
+    let left = parseEquality();
+    while (pos < tokens.length) {
+      const token = peek();
+      if (token && token.type === "KEYWORD_OP" && token.value === "AND") {
+        consume();
+        const right = parseEquality();
+        left = Boolean(left && right);
+      } else {
+        break;
+      }
+    }
+    return left;
+  }
+
+  function parseEquality(): any {
+    let left = parseRelational();
+    while (pos < tokens.length) {
+      const token = peek();
+      if (token && token.type === "OPERATOR" && (token.value === "=" || token.value === "<>")) {
+        consume();
+        const right = parseRelational();
+        if (token.value === "=") left = left === right;
+        else left = left !== right;
+      } else {
+        break;
+      }
+    }
+    return left;
+  }
+
+  function parseRelational(): any {
+    let left = parseAdditive();
+    while (pos < tokens.length) {
+      const token = peek();
+      if (token && token.type === "OPERATOR" && ["<", "<=", ">", ">="].includes(token.value)) {
+        consume();
+        const right = parseAdditive();
+        if (token.value === "<") left = left < right;
+        else if (token.value === "<=") left = left <= right;
+        else if (token.value === ">") left = left > right;
+        else if (token.value === ">=") left = left >= right;
+      } else {
+        break;
+      }
+    }
+    return left;
+  }
+
+  function parseAdditive(): any {
+    let left = parseMultiplicative();
+    while (pos < tokens.length) {
+      const token = peek();
+      if (token && token.type === "OPERATOR" && (token.value === "+" || token.value === "-")) {
+        consume();
+        const right = parseMultiplicative();
+        if (token.value === "+") {
+          if (typeof left === "string" || typeof right === "string") {
+            left = String(left ?? "") + String(right ?? "");
+          } else {
+            left = Number(left) + Number(right);
+          }
+        } else {
+          left = Number(left) - Number(right);
+        }
+      } else {
+        break;
+      }
+    }
+    return left;
+  }
+
+  function parseMultiplicative(): any {
+    let left = parseUnary();
+    while (pos < tokens.length) {
+      const token = peek();
+      if (
+        token &&
+        ((token.type === "OPERATOR" && (token.value === "*" || token.value === "/")) ||
+          (token.type === "KEYWORD_OP" && (token.value === "DIV" || token.value === "MOD")))
+      ) {
+        consume();
+        const right = parseUnary();
+        if (token.value === "*") left = Number(left) * Number(right);
+        else if (token.value === "/") left = Number(left) / Number(right);
+        else if (token.value === "DIV") left = Math.floor(Number(left) / Number(right));
+        else if (token.value === "MOD") left = Number(left) % Number(right);
+      } else {
+        break;
+      }
+    }
+    return left;
+  }
+
+  function parseUnary(): any {
+    const token = peek();
+    if (token) {
+      if (token.type === "OPERATOR" && token.value === "-") {
+        consume();
+        return -Number(parseUnary());
+      }
+      if (token.type === "OPERATOR" && token.value === "+") {
+        consume();
+        return +Number(parseUnary());
+      }
+      if (token.type === "KEYWORD_OP" && token.value === "NOT") {
+        consume();
+        return !parseUnary();
+      }
+    }
+    return parsePrimary();
+  }
+
+  function parsePrimary(): any {
+    const token = consume();
+    if (!token) return undefined;
+
+    if (token.type === "NUMBER") {
+      return Number(token.value);
+    }
+    if (token.type === "STRING") {
+      return token.value;
+    }
+    if (token.type === "BOOLEAN") {
+      return token.value === "TRUE";
+    }
+    if (token.type === "OPERATOR" && token.value === "(") {
+      const val = parseOr();
+      if (peek() && peek().value === ")") consume(")");
+      return val;
+    }
+    if (token.type === "OPERATOR" && (token.value === "[" || token.value === "{")) {
+      const closeChar = token.value === "[" ? "]" : "}";
+      const elements: any[] = [];
+      while (pos < tokens.length && peek()?.value !== closeChar) {
+        elements.push(parseOr());
+        if (peek()?.value === ",") consume(",");
+      }
+      if (peek()?.value === closeChar) consume(closeChar);
+      return elements;
+    }
+    if (token.type === "IDENT") {
+      const lower = token.value.toLowerCase();
+      // Look in variables
+      if (context.variables && lower in context.variables) {
+        return context.variables[lower];
+      }
+      // Look in targetLibrary
+      if (context.targetLibrary) {
+        const canonical = findTargetKey(context.targetLibrary, token.value);
+        if (canonical && context.targetLibrary[canonical]) {
+          return context.targetLibrary[canonical];
+        }
+      }
+      // Fallback
+      return 0;
+    }
+
+    return token.value;
+  }
+
+  try {
+    return parseOr();
+  } catch (_e) {
+    return trimmed;
+  }
+}
+
+export function formatTPWrite(
+  command: { text?: string; textExpr?: string; params?: TPWriteParam[] },
+  context: EvaluationContext
+): string {
+  if (command.text !== undefined && !command.textExpr && (!command.params || command.params.length === 0)) {
+    return command.text;
+  }
+
+  let baseText = "";
+  if (command.textExpr !== undefined) {
+    const val = evaluateExpression(command.textExpr, context);
+    baseText = val === undefined || val === null ? "" : String(val);
+  } else if (command.text !== undefined) {
+    baseText = command.text;
+  }
+
+  if (!command.params || command.params.length === 0) {
+    return baseText;
+  }
+
+  const paramTexts = command.params.map((p) => {
+    if (!p.expr) return "";
+    const val = evaluateExpression(p.expr, context);
+    if (p.kind === "bool") {
+      return val ? "TRUE" : "FALSE";
+    }
+    if (p.kind === "pos" || p.kind === "orient") {
+      if (Array.isArray(val)) {
+        return `[${val.join(", ")}]`;
+      }
+      return String(val ?? "");
+    }
+    if (typeof val === "number") {
+      return Number.isInteger(val) ? String(val) : String(Number(val.toFixed(4)));
+    }
+    if (Array.isArray(val)) {
+      return `[${val.join(", ")}]`;
+    }
+    return String(val ?? "");
+  });
+
+  return baseText + paramTexts.join("");
+}
+
+export function parseDeclaration(source: string): { variables: Array<{ name: string; type: string; initialValue?: any }> } | null {
+  const match = source.match(/^(?:VAR|PERS|CONST)\s+([A-Za-z_]\w*)\s+(.+?);?$/i);
+  if (!match) return null;
+  const typeName = match[1].toLowerCase();
+  const defsStr = match[2];
+
+  const variables: Array<{ name: string; type: string; initialValue?: any }> = [];
+
+  // Split comma separated defs: a := 1, b := 2
+  const defs: string[] = [];
+  let current = "";
+  let inQ = false;
+  let depth = 0;
+  for (let i = 0; i < defsStr.length; i++) {
+    const ch = defsStr[i];
+    if (ch === '"') inQ = !inQ;
+    else if (!inQ) {
+      if (ch === '[' || ch === '(' || ch === '{') depth++;
+      else if (ch === ']' || ch === ')' || ch === '}') depth--;
+      else if (ch === ',' && depth === 0) {
+        defs.push(current.trim());
+        current = "";
+        continue;
+      }
+    }
+    current += ch;
+  }
+  if (current.trim()) {
+    defs.push(current.trim());
+  }
+
+  for (const def of defs) {
+    const assignMatch = def.match(/^([A-Za-z_]\w*)(?:\s*:=\s*(.+))?$/);
+    if (assignMatch) {
+      const name = assignMatch[1];
+      const rawVal = assignMatch[2]?.trim();
+      let initialValue: any = undefined;
+      if (rawVal !== undefined) {
+        initialValue = evaluateExpression(rawVal, { variables: {}, targetLibrary: targets });
+      } else {
+        if (typeName === "num" || typeName === "dnum") initialValue = 0;
+        else if (typeName === "bool") initialValue = false;
+        else if (typeName === "string") initialValue = "";
+        else if (typeName === "pos") initialValue = [0, 0, 0];
+        else initialValue = 0;
+      }
+      variables.push({ name, type: typeName, initialValue });
+    }
+  }
+
+  return { variables };
+}
+
+export function parseTPWriteArgs(argsStr: string): { textExpr?: string; params: TPWriteParam[]; error?: string } {
+  const trimmed = argsStr.trim();
+  if (!trimmed) {
+    return { params: [] };
+  }
+
+  // Find the first backslash that is not inside a string literal
+  let firstSlashIdx = -1;
+  let inQuote = false;
+  for (let i = 0; i < trimmed.length; i++) {
+    if (trimmed[i] === '"') {
+      inQuote = !inQuote;
+    } else if (trimmed[i] === "\\" && !inQuote) {
+      firstSlashIdx = i;
+      break;
+    }
+  }
+
+  let textExpr: string | undefined = undefined;
+  let paramsPart = "";
+
+  if (firstSlashIdx === -1) {
+    textExpr = trimmed;
+  } else {
+    const rawText = trimmed.slice(0, firstSlashIdx).trim();
+    const cleanedText = rawText.replace(/,\s*$/, "").trim();
+    if (cleanedText.length > 0) {
+      textExpr = cleanedText;
+    }
+    paramsPart = trimmed.slice(firstSlashIdx);
+  }
+
+  const params: TPWriteParam[] = [];
+  if (paramsPart) {
+    let i = 0;
+    while (i < paramsPart.length) {
+      if (paramsPart[i] !== "\\") {
+        i++;
+        continue;
+      }
+      i++; // skip \
+      const nameMatch = paramsPart.slice(i).match(/^[A-Za-z_]\w*/);
+      if (!nameMatch) {
+        return { params: [], error: "Nieprawidłowy parametr w instrukcji TPWrite." };
+      }
+      const paramName = nameMatch[0];
+      i += paramName.length;
+
+      while (i < paramsPart.length && /\s/.test(paramsPart[i])) i++;
+
+      let expr = "";
+      if (paramsPart.slice(i, i + 2) === ":=") {
+        i += 2; // skip :=
+        while (i < paramsPart.length && /\s/.test(paramsPart[i])) i++;
+        const startExpr = i;
+        let depthBracket = 0;
+        let depthParen = 0;
+        let inQ = false;
+        while (i < paramsPart.length) {
+          const ch = paramsPart[i];
+          if (ch === '"') inQ = !inQ;
+          else if (!inQ) {
+            if (ch === "[" || ch === "{") depthBracket++;
+            else if (ch === "]" || ch === "}") depthBracket--;
+            else if (ch === "(") depthParen++;
+            else if (ch === ")") depthParen--;
+            else if (ch === "\\" && depthBracket === 0 && depthParen === 0) {
+              break;
+            }
+          }
+          i++;
+        }
+        expr = paramsPart.slice(startExpr, i).trim().replace(/,\s*$/, "").replace(/;\s*$/, "");
+      }
+
+      const lowerKind = paramName.toLowerCase();
+      let kind: "num" | "dnum" | "bool" | "pos" | "orient" = "num";
+      if (lowerKind === "num") kind = "num";
+      else if (lowerKind === "dnum") kind = "dnum";
+      else if (lowerKind === "bool") kind = "bool";
+      else if (lowerKind === "pos") kind = "pos";
+      else if (lowerKind === "orient") kind = "orient";
+      else {
+        kind = "num";
+      }
+
+      params.push({ kind, expr });
+    }
+  }
+
+  return { textExpr, params };
+}
+
 type ProcedureDefinition = {
   name: string;
   startLine: number;
@@ -628,12 +1110,13 @@ type ProcedureDefinition = {
 export function compile(
   code: string,
   targetLibrary: Record<string, [number, number, number]> = targets
-): { commands: Command[]; error?: string; errorLine?: number } {
+): { commands: Command[]; initialVariables?: Record<string, any>; error?: string; errorLine?: number } {
   const lines = code.split("\n");
   const procedures = new Map<string, ProcedureDefinition>();
+  const initialVariables: Record<string, any> = {};
   let currentProc: ProcedureDefinition | null = null;
 
-  // Pass 1: Parse module structure and collect procedures
+  // Pass 1: Parse module structure, collect declarations and procedures
   for (let index = 0; index < lines.length; index += 1) {
     const lineNum = index + 1;
     const source = removeComment(lines[index]).trim();
@@ -681,8 +1164,15 @@ export function compile(
       continue;
     }
 
-    // Outside of any procedure
+    // Outside of any procedure: check for variable declarations
     if (!currentProc) {
+      const decl = parseDeclaration(source);
+      if (decl) {
+        for (const v of decl.variables) {
+          initialVariables[v.name.toLowerCase()] = v.initialValue;
+        }
+        continue;
+      }
       if (/^(CONST|VAR|PERS)\b/i.test(source)) {
         continue;
       }
@@ -734,11 +1224,25 @@ export function compile(
 
     for (const item of proc.body) {
       const { text: source, line } = item;
+
+      // Routine-level variable declaration
+      const decl = parseDeclaration(source);
+      if (decl) {
+        for (const v of decl.variables) {
+          initialVariables[v.name.toLowerCase()] = v.initialValue;
+        }
+        continue;
+      }
       if (/^(CONST|VAR|PERS)\b/i.test(source)) continue;
 
       let match: RegExpMatchArray | null;
-      if ((match = source.match(/^TPWrite\s+"(.*)"\s*;?$/i))) {
-        commands.push({ type: "log", text: match[1], line });
+      if (/^TPWrite\b/i.test(source)) {
+        const argsStr = source.replace(/^TPWrite\s*/i, "").replace(/;$/, "");
+        const parsed = parseTPWriteArgs(argsStr);
+        if (parsed.error) return { error: `Linia ${line}: ${parsed.error}`, errorLine: line };
+        commands.push({ type: "log", textExpr: parsed.textExpr, params: parsed.params, line });
+      } else if (/^TPErase\s*;?$/i.test(source)) {
+        commands.push({ type: "tpErase", line });
       } else if ((match = source.match(/^(MoveJ|MoveL)\s+(\w+)/i))) {
         const rawTarget = match[2];
         const target = findTargetKey(targetLibrary, rawTarget);
@@ -752,28 +1256,47 @@ export function compile(
         if (!via) return { error: `Linia ${line}: nieznany robtarget „${rawVia}”.`, errorLine: line };
         if (!target) return { error: `Linia ${line}: nieznany robtarget „${rawTarget}”.`, errorLine: line };
         commands.push({ type: "move", kind: "MoveC", via, target, line });
-      } else if ((match = source.match(/^(SetDO)\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
+      } else if ((match = source.match(/^(SetDO)\s+(\w+)\s*,\s*([01]|high|low)\s*;?$/i))) {
         const signal = findOutputName(match[2]);
         if (!signal) return { error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
-        commands.push({ type: "output", signal, value: match[3] === "1", line });
+        const isHigh = match[3] === "1" || match[3].toLowerCase() === "high";
+        commands.push({ type: "output", signal, value: isHigh, line });
       } else if ((match = source.match(/^(Set|Reset|ResetDO)\s+(\w+)/i))) {
         const signal = findOutputName(match[2]);
         if (!signal) return { error: `Linia ${line}: wyjscie „${match[2]}” nie jest skonfigurowane.`, errorLine: line };
         const isSet = /^Set$/i.test(match[1]);
         commands.push({ type: "output", signal, value: isSet, line });
-      } else if ((match = source.match(/^WaitDI\s+(\w+)\s*,\s*([01])\s*;?$/i))) {
+      } else if ((match = source.match(/^WaitDI\s+(\w+)\s*,\s*([01]|high|low)\s*;?$/i))) {
         const signal = findInputName(match[1]);
         if (!signal) return { error: `Linia ${line}: wejscie „${match[1]}” nie jest skonfigurowane.`, errorLine: line };
-        commands.push({ type: "waitInput", signal, value: match[2] === "1", line });
-      } else if ((match = source.match(/^WaitTime\s+([\d.]+)/i))) {
-        commands.push({ type: "wait", seconds: Number(match[1]), line });
-      } else if ((match = source.match(/^Incr\s+(\w+)/i))) {
-        commands.push({ type: "increment", variable: match[1], line });
-      } else if ((match = source.match(/^Clear\s+(\w+)/i))) {
-        commands.push({ type: "clear", variable: match[1], line });
+        const isHigh = match[2] === "1" || match[2].toLowerCase() === "high";
+        commands.push({ type: "waitInput", signal, value: isHigh, line });
+      } else if ((match = source.match(/^WaitTime\s+(?:\\InPos\s*,\s*)?([A-Za-z0-9_.]+)/i))) {
+        const val = Number(match[1]);
+        commands.push({ type: "wait", seconds: isNaN(val) ? 1 : val, line });
+      } else if ((match = source.match(/^Incr\s+([A-Za-z_]\w*)(?:\s*,?\s*\\Step\s*:=\s*([^;]+))?\s*;?$/i))) {
+        const varName = match[1];
+        if (!(varName.toLowerCase() in initialVariables)) initialVariables[varName.toLowerCase()] = 0;
+        commands.push({ type: "increment", variable: varName, stepExpr: match[2]?.trim(), line });
+      } else if ((match = source.match(/^Decr\s+([A-Za-z_]\w*)(?:\s*,?\s*\\Step\s*:=\s*([^;]+))?\s*;?$/i))) {
+        const varName = match[1];
+        if (!(varName.toLowerCase() in initialVariables)) initialVariables[varName.toLowerCase()] = 0;
+        commands.push({ type: "decrement", variable: varName, stepExpr: match[2]?.trim(), line });
+      } else if ((match = source.match(/^Clear\s+([A-Za-z_]\w*)\s*;?$/i))) {
+        const varName = match[1];
+        if (!(varName.toLowerCase() in initialVariables)) initialVariables[varName.toLowerCase()] = 0;
+        commands.push({ type: "clear", variable: varName, line });
+      } else if ((match = source.match(/^Add\s+([A-Za-z_]\w*)\s*,\s*([^;]+)\s*;?$/i))) {
+        const varName = match[1];
+        if (!(varName.toLowerCase() in initialVariables)) initialVariables[varName.toLowerCase()] = 0;
+        commands.push({ type: "add", variable: varName, expr: match[2].trim(), line });
+      } else if ((match = source.match(/^([A-Za-z_]\w*)\s*:=\s*([^;]+)\s*;?$/i))) {
+        const varName = match[1];
+        if (!(varName.toLowerCase() in initialVariables)) initialVariables[varName.toLowerCase()] = 0;
+        commands.push({ type: "assign", variable: varName, expr: match[2].trim(), line });
       } else if (/^Stop\s*;?$/i.test(source)) {
         commands.push({ type: "stop", line });
-      } else if (/^(IF|ELSE|ENDIF|WHILE|ENDWHILE|FOR|ENDFOR|TEST|CASE|DEFAULT|ENDTEST|TPErase)/i.test(source)) {
+      } else if (/^(IF|ELSE|ENDIF|WHILE|ENDWHILE|FOR|ENDFOR|TEST|CASE|DEFAULT|ENDTEST)/i.test(source)) {
         return { error: `Linia ${line}: ta struktura RAPID nie jest jeszcze wykonywalna w wersji edukacyjnej.`, errorLine: line };
       } else {
         // Procedure Call: name; or name(); or name
@@ -798,7 +1321,7 @@ export function compile(
     return { commands: [], error: result.error, errorLine: result.errorLine };
   }
 
-  return { commands };
+  return { commands, initialVariables };
 }
 
 export function targetNamesInCode(code: string, targetLibrary: Record<string, [number, number, number]> = targets) {

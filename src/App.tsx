@@ -3,7 +3,7 @@ import type { editor as MonacoEditorType } from "monaco-editor";
 import { useEffect, useRef, useState } from "react";
 import { RobotScene } from "./RobotScene";
 import { moveCPosition } from "./motion";
-import { blankProjectCode, compile, examples, tasks, targetNamesInCode, targets, type Command, type ExecutionStatus, type SignalMap, type StudentProject, type Task, type ToolKind } from "./rapid";
+import { blankProjectCode, compile, evaluateExpression, examples, formatTPWrite, tasks, targetNamesInCode, targets, type Command, type ExecutionStatus, type SignalMap, type StudentProject, type Task, type ToolKind } from "./rapid";
 import { clampToReach, defaultTablePosition, defaultTcp, getFloorZ, isReachable, robotReach, tableConfig, type BlockItem, type SceneSnapshot } from "./robotConfig";
 
 const initialInputs: SignalMap = { diStart: false, diPartPresent: false, diReset: false, diSafetyOk: true };
@@ -87,6 +87,7 @@ export function App() {
   const blocksRef = useRef<BlockItem[]>([{ id: "block-1", position: initialBlock }]);
   const undoStackRef = useRef<SceneSnapshot[]>([]);
   const redoStackRef = useRef<SceneSnapshot[]>([]);
+  const variablesRef = useRef<Record<string, any>>({});
   const monacoRef = useRef<Monaco>();
   const monacoEditorRef = useRef<MonacoEditorType.IStandaloneCodeEditor>();
   const editorPanelRef = useRef<HTMLElement>(null);
@@ -241,6 +242,7 @@ export function App() {
     replaceTrail([]);
     setActiveLine(undefined);
     setAwaiting(undefined);
+    variablesRef.current = {};
     undoStackRef.current = [];
     redoStackRef.current = [];
     updateUndoRedoState();
@@ -402,14 +404,75 @@ export function App() {
 
   const execute = (command: Command) => {
     setActiveLine(command.line);
-    if (command.type === "log") { log(command.text); next(); return; }
+    if (command.type === "log") {
+      const text = formatTPWrite(command, {
+        variables: variablesRef.current,
+        targetLibrary: targetPositionsRef.current,
+      });
+      log(text);
+      next();
+      return;
+    }
+    if (command.type === "tpErase") {
+      setConsoleLines([]);
+      next();
+      return;
+    }
     if (command.type === "output") {
       if (command.signal === "doGripper") setGripperOutput(command.value);
       else setOutputs((values) => ({ ...values, [command.signal]: command.value }));
       log(`${command.value ? "Set" : "Reset"} ${command.signal}`); next(); return;
     }
-    if (command.type === "increment") { log(`Incr ${command.variable}`); next(); return; }
-    if (command.type === "clear") { log(`Clear ${command.variable}`); next(); return; }
+    if (command.type === "increment") {
+      const varKey = command.variable.toLowerCase();
+      const step = command.stepExpr
+        ? evaluateExpression(command.stepExpr, { variables: variablesRef.current, targetLibrary: targetPositionsRef.current })
+        : 1;
+      const currentVal = typeof variablesRef.current[varKey] === "number" ? variablesRef.current[varKey] : 0;
+      variablesRef.current[varKey] = currentVal + (Number(step) || 1);
+      log(`Incr ${command.variable}`);
+      next();
+      return;
+    }
+    if (command.type === "decrement") {
+      const varKey = command.variable.toLowerCase();
+      const step = command.stepExpr
+        ? evaluateExpression(command.stepExpr, { variables: variablesRef.current, targetLibrary: targetPositionsRef.current })
+        : 1;
+      const currentVal = typeof variablesRef.current[varKey] === "number" ? variablesRef.current[varKey] : 0;
+      variablesRef.current[varKey] = currentVal - (Number(step) || 1);
+      log(`Decr ${command.variable}`);
+      next();
+      return;
+    }
+    if (command.type === "clear") {
+      const varKey = command.variable.toLowerCase();
+      variablesRef.current[varKey] = 0;
+      log(`Clear ${command.variable}`);
+      next();
+      return;
+    }
+    if (command.type === "assign") {
+      const varKey = command.variable.toLowerCase();
+      const val = evaluateExpression(command.expr, {
+        variables: variablesRef.current,
+        targetLibrary: targetPositionsRef.current,
+      });
+      variablesRef.current[varKey] = val;
+      next();
+      return;
+    }
+    if (command.type === "add") {
+      const varKey = command.variable.toLowerCase();
+      const val = evaluateExpression(command.expr, {
+        variables: variablesRef.current,
+        targetLibrary: targetPositionsRef.current,
+      });
+      const currentVal = typeof variablesRef.current[varKey] === "number" ? variablesRef.current[varKey] : 0;
+      variablesRef.current[varKey] = currentVal + (Number(val) || 0);
+      next();
+      return;
+    }
     if (command.type === "stop") { setStatus("Completed"); log("Program zatrzymany przez Stop."); return; }
     if (command.type === "waitInput") {
       if (inputs[command.signal] === command.value) { next(); return; }
@@ -453,6 +516,7 @@ export function App() {
     clearTimer();
     cancelled.current = false;
     commands.current = result.commands;
+    variablesRef.current = { ...(result.initialVariables ?? {}) };
     pc.current = 0;
     replaceTrail([tcpRef.current]);
     setStatus("Running");
@@ -689,14 +753,15 @@ export function App() {
     monacoRef.current = monaco;
     monaco.languages.register({ id: "rapid" });
     monaco.languages.setMonarchTokensProvider("rapid", {
-      keywords: ["MODULE", "ENDMODULE", "PROC", "ENDPROC", "VAR", "PERS", "CONST", "IF", "THEN", "ELSE", "ENDIF", "WHILE", "DO", "ENDWHILE", "FOR", "FROM", "TO", "ENDFOR"],
-      instructions: ["MoveJ", "MoveL", "MoveC", "Set", "Reset", "SetDO", "ResetDO", "WaitDI", "WaitTime", "TPWrite", "Incr", "Clear", "Stop"],
+      keywords: ["MODULE", "ENDMODULE", "PROC", "ENDPROC", "VAR", "PERS", "CONST", "IF", "THEN", "ELSE", "ENDIF", "WHILE", "DO", "ENDWHILE", "FOR", "FROM", "TO", "ENDFOR", "num", "dnum", "bool", "string", "pos", "orient", "robtarget", "TRUE", "FALSE", "DIV", "MOD", "AND", "OR", "XOR", "NOT"],
+      instructions: ["MoveJ", "MoveL", "MoveC", "Set", "Reset", "SetDO", "ResetDO", "WaitDI", "WaitDO", "WaitTime", "TPWrite", "TPErase", "Incr", "Decr", "Clear", "Add", "Stop"],
       tokenizer: {
         root: [
           [/!.*/, "comment"],
           [/".*?"/, "string"],
+          [/\\[a-zA-Z_]\w*/, "tag"],
           [/[a-zA-Z_][\w]*/, { cases: { "@keywords": "keyword", "@instructions": "type", "@default": "identifier" } }],
-          [/\d+/, "number"],
+          [/\d+(?:\.\d+)?/, "number"],
         ],
       },
     });
