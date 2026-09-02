@@ -21,9 +21,13 @@ export const robotReach = {
 
 export const defaultTablePosition: [number, number] = [0, 440];
 
+export type BlockMaterial = "metal" | "plastic";
+
 export type BlockItem = {
   id: string;
   position: [number, number, number];
+  material?: BlockMaterial;
+  color?: string;
 };
 
 export type SceneSnapshot = {
@@ -51,6 +55,29 @@ export const tableConfig = {
   holeRadius: 14,
 } as const;
 
+export const conveyorConfig = {
+  centerX: -195,
+  centerY: 440,
+  width: 120,
+  length: 370,
+  beltZ: 216,
+  binX: -430,
+  binY: 440,
+  binZ: 85,
+} as const;
+
+export type WorkObjectDef = {
+  name: string;
+  uframe: [number, number, number]; // [x, y, z] translation
+  rotZ?: number; // rotation around Z in degrees
+};
+
+export const defaultWorkObjects: Record<string, WorkObjectDef> = {
+  wobj0: { name: "wobj0", uframe: [0, 0, 0], rotZ: 0 },
+  wobj1: { name: "wobj1", uframe: [-90, 420, 220], rotZ: 0 },
+  wobj2: { name: "wobj2", uframe: [110, 420, 220], rotZ: 0 },
+};
+
 export function isOverTable(x: number, y: number, tableCenter: [number, number] = defaultTablePosition): boolean {
   const halfWidth = tableConfig.width / 2;
   const halfDepth = tableConfig.depth / 2;
@@ -62,11 +89,51 @@ export function isOverTable(x: number, y: number, tableCenter: [number, number] 
   );
 }
 
-export function getFloorZ(x: number, y: number, hasTable: boolean, tableCenter: [number, number] = defaultTablePosition): number {
+export function isOverConveyor(x: number, y: number): boolean {
+  const halfL = conveyorConfig.length / 2;
+  const halfW = conveyorConfig.width / 2;
+  return (
+    x >= conveyorConfig.centerX - halfL - 10 &&
+    x <= conveyorConfig.centerX + halfL + 10 &&
+    y >= conveyorConfig.centerY - halfW - 10 &&
+    y <= conveyorConfig.centerY + halfW + 10
+  );
+}
+
+export function getFloorZ(
+  x: number,
+  y: number,
+  hasTable: boolean,
+  tableCenter: [number, number] = defaultTablePosition,
+  blocks: BlockItem[] = [],
+  ignoreBlockId: string | null = null
+): number {
+  // Base surface height
+  let baseZ = 35;
   if (hasTable && isOverTable(x, y, tableCenter)) {
-    return tableConfig.topZ + 35;
+    baseZ = tableConfig.topZ + 35; // 235
   }
-  return 35;
+
+  // Check if resting on conveyor
+  if (hasTable && isOverConveyor(x, y)) {
+    baseZ = Math.max(baseZ, conveyorConfig.beltZ + 25);
+  }
+
+  // Check stacking on other blocks (within 42mm horizontal radius)
+  let maxStackedZ = baseZ;
+  for (const block of blocks) {
+    if (block.id === ignoreBlockId) continue;
+    const dist = Math.hypot(block.position[0] - x, block.position[1] - y);
+    if (dist < 42) {
+      const blockHeight = block.id.startsWith("ring") ? 28 : 48;
+      const topOfBlock = block.position[2] + blockHeight;
+      if (topOfBlock > maxStackedZ) {
+        maxStackedZ = topOfBlock;
+      }
+    }
+  }
+
+  return maxStackedZ;
 }
 
 export const defaultTcp: [number, number, number] = [220, 340, 480];
@@ -95,3 +162,4 @@ export function clampToReach([x, y, z]: [number, number, number]): [number, numb
   const scale = clampedDistance / distance;
   return [offsetX * scale, offsetY * scale, robotGeometry.shoulderHeight + offsetZ * scale];
 }
+

@@ -1,0 +1,799 @@
+ELM.08 105
+Zadanie egzaminacyjne
+Twoim zadaniem jest diagnoza i naprawa systemu zrobotyzowanego a także napisanie i sprawdzenie
+programu sterującego robotem zgodnie z danymi zawartymi w arkuszu.
+Na stanowisku egzaminacyjnym znajduje się robot przemysłowy realizujący aplikację paletyzacji
+polegającą na pobieraniu detali z magazynu opadowego, transportowaniu przenośnikiem taśmowym
+i ułożeniu czterech detali na palecie. Widok poglądowy zrobotyzowanego stanowiska paletyzacji
+przedstawiono na rysunku 1.
+Rysunek 1. Poglądowy widok zrobotyzowanego stanowiska paletyzacji
+Zrobotyzowane stanowisko wyposażone zostało w magazyn opadowy elementu transportowanego,
+przenośnik taśmowy oraz paletę 2x2, na której układane będą cztery detale. Wzajemne rozmieszczenie
+wyposażenia przedstawiono na rysunku 2. Rysunek 3 pokazuje ułożenie detalu przed pobraniem go
+z magazynu opadowego.
+Schemat elektryczny systemu zrobotyzowanego przedstawiono na rysunku 4. Robot wyposażony jest
+w pneumatyczny chwytak szczękowy.
+Zapoznaj się z dokumentacją techniczną zrobotyzowanego stanowiska, a następnie:
+− wykonaj czynności eksploatacyjne związane z przygotowaniem robota przemysłowego do pracy
+zgodnie z dodatkowymi uwagami dotyczącymi wykonania zdania,
+− uzupełnij Tabelę 1. Protokół z przeprowadzonych pomiarów kontrolnych systemu zrobotyzowanego,
+− określ usterki i nieprawidłowości systemu zrobotyzowanego i wykonaj potrzebne naprawy na
+podstawie Rysunku 4. Schemat elektryczny systemu zrobotyzowanego,
+− napisz i przetestuj program robota zgodny z opisem działania systemu zrobotyzowanego, opisz linie
+programu komentarzami i nadaj nazwy punktom: HOME, pobierania z magazynu opadowego,
+położenie początkowe detalu lub punkt odkładania do palety.
+ELM.08 105
+Opis działania stanowiska zrobotyzowanego
+Rysunek 2. Widok płyty z robotem i zamontowanymi elementami systemu zrobotyzowanego
+Rysunek 3. Widok umiejscowienia punktu pobierania detalu z magazynu opadowego
+Przed uruchomieniem robot znajduje się w pozycji HOME, chwytak jest otworzony, lampki sygnalizacyjne
+H1, H2 są wyłączone, w magazynie opadowym znajdują się cztery elementy transportowane (detale).
+ELM.08 105
+Po zadaniu sygnału START przyciskiem S1 rozpoczyna się cykl pracy systemu zrobotyzowanego:
+1. Uruchomienie cyklu pracy systemu zrobotyzowanego sygnalizowane jest świeceniem lampki
+2. 3. 4. 5. 6. 7. 8. 9. 10. 11. zielonej H1.
+Po uruchomieniu ramię robota jedzie z prędkością 40 % prędkości maksymalnej ruchem od
+punktu do punktu (w interpolacji złączowej) 50 mm nad detal, a następnie ruchem liniowym do
+punktu pobierania detalu z magazynu opadowego.
+Po dojechaniu do punktu pobierania detalu zamyka się chwytak i robot ruchem liniowym pobiera
+detal z magazynu opadowego na wysokość 50 mm, a następnie ruchem złączowym
+transportuje detal 30 mm nad początek przenośnika taśmowego, w miejsce wskazane na
+rysunku 2.
+Następnie ramię robota zjeżdża ruchem liniowym do powierzchni taśmy taśmociągu, odkłada
+detal w punkcie położenia początkowego detalu i odjeżdża 40 mm ruchem liniowym nad taśmę
+przenośnika z prędkością 40 % prędkości maksymalnej.
+Po odjechaniu ramienia robota 40 mm nad odłożony detal i wykryciu detalu przez czujnik
+optyczny B3 następuje załączenie taśmy przenośnika w lewo (sygnały START/STOP = 1
+a LEWO/PRAWO = 0) i detal transportowany jest do pozycjonera przenośnika taśmowego.
+Po wykryciu detalu przez czujnik pojemnościowy B1 w pozycjonerze przenośnika taśmowego
+następuje zatrzymanie taśmy przenośnika (sygnał START/STOP = 0), a następnie robot ruchem
+liniowym pobiera detal z taśmy przenośnika i ruchem od punktu do punktu (w interpolacji
+złączowej) transportuje detal 50 mm nad pierwsze pole palety.
+Następnie odkłada detal do pierwszego pola palety, odjeżdża 50 mm ruchem liniowym nad
+paletę.
+System zrobotyzowany powtarza kroki od 3. do 7., odkładając klocek do drugiego, a następnie
+trzeciego i czwartego pola palety.
+Po zapełnieniu czterech pól palety detalami kończy się cykl pracy systemu zrobotyzowanego, co
+zostaje sygnalizowane świeceniem lampki czerwonej H2 oraz przejazdem robota do pozycji
+HOME ruchem od punktu do punktu (w interpolacji złączowej).
+Przed rozpoczęciem kolejnego cyklu pracy systemu zrobotyzowanego należy ręcznie odebrać
+cztery detale z palety i zapełnić nimi magazyn opadowy.
+Przenośnik taśmowy sterowany jest sygnałami zgodnie z tabelą prawdy.
+Sygnał sterujący
+przenośnikiem START/STOP LEWO/PRAWO Ruch przenośnika [V] DC
+START 24
+STOP 0
+LEWO 0
+PRAWO 24
+ELM.08 105
+Rysunek 4. Schemat elektryczny systemu zrobotyzowanego
+Dodatkowe uwagi dotyczące wykonania zadania
+W oparciu o dane zwarte w dokumentacji technicznej przygotuj robota. W tym celu włącz zasilanie
+elektryczne robota oraz podłącz do zasilania 24 V DC obwody wejściowe i wyjściowe robota. Sprawdź
+poprawność montażu i kalibracji sensorów na stanowisku zrobotyzowanym.
+Włącz i sprawdź sprawność wszystkich napędów robota. Przetestuj działanie układu bezpieczeństwa
+robota oraz poprawność montażu i działanie chwytaka robota. Nawiąż i przetestuj komunikację pomiędzy
+kontrolerem robota a środowiskiem programowania robota. Skonfiguruj chwytak w środowisku robota.
+Sprawdź, czy czujnik pojemnościowy B1 wykrywa obecność detalu w pozycjonerze przenośnika
+taśmowego. Ustaw prędkość przesuwu taśmy przenośnika taśmowego w granicach 4–8 cm/s.
+Po wykonaniu pomiarów i niezbędnych napraw w systemie, napisz program zgodny z opisem działania
+stanowiska zrobotyzowanego i przetestuj go w trybie TESTOWYM (CHECK). Upewnij się, że w programie
+nie ma błędów i kolizji. Następnie uruchom program w trybie wykonywania programu z zapewnieniem
+odpowiednich warunków bezpieczeństwa. Wymagane naprawy systemu zrobotyzowanego przeprowadzaj
+przy wyłączonym napięciu zasilania.
+Po zakończeniu zadania posprzątaj stanowisko pracy. Nie wyłączaj zasilania układu, pozostaw
+napisany program robota.
+Stosuj dostępne na stanowisku środki ochrony osobistej. Za każdym razem przez podniesienie ręki
+zgłaszaj zamiar włączenia zasilania elektrycznego i pneumatycznego oraz uruchomienia programu
+w trybie automatycznym. Do testowania aplikacji użyj prędkości do 10 % wartości maksymalnej.
+Nie wszystkie elementy i złączki zamontowane na stanowisku będą wykorzystane w tym zadaniu.
+ELM.08 105
+Czas przeznaczony na wykonanie zadania wynosi 150 minut.
+Ocenie będą podlegać 4 rezultaty:
+− robot przemysłowy przygotowany do pracy,
+− protokół z przeprowadzonych pomiarów kontrolnych systemu zrobotyzowanego – tabela 1,
+− system zrobotyzowany po wykonaniu napraw,
+− zgodność działania programu systemu zrobotyzowanego z podanym opisem pracy,
+oraz
+przebieg wykonanego przeglądu i podjętych działań prowadzących do zaprogramowania i przetestowania
+działania systemu zrobotyzowanego.
+ELM.08 105
+DOKUMENTACJA DO WYPEŁNIENIA PRZEZ ZDAJĄCEGO
+Tabela 1. Protokół z przeprowadzonych pomiarów kontrolnych systemu zrobotyzowanego
+Określ stan połączeń elektrycznych oraz usterki w układzie sterowania systemu zrobotyzowanego.
+Wykonaj potrzebne naprawy w systemie zrobotyzowanym.
+Wartość rezystancji między wybranymi punktami w układzie sterowania
+Adres odcinka
+Zmierzona wartość
+Ocena poprawności wyniku
+Wpisz TAK, jeżeli
+została wykonana
+przewodu
+rezystancji przed naprawą
+pomiaru przed naprawą
+potrzebna
+Lp.
+naprawa
+Oznaczenia na
+rysunku 4.
+Rezystancja [Ω] Wpisz poprawny lub
+niepoprawny
+1 H1:X1/X4:1
+2 H1:X1/X4:2
+3 H2:X1/X4:2
+Napięcie sterujące uruchomieniem przenośnika taśmowego (sygnał START/STOP)
+Napięcie [V] Oznaczenie
+elementu
+Przed
+testowym
+załączeniem
+(STOP)
+Po testowym
+załączeniu
+(START)
+Ocena poprawności działania
+przenośnika taśmowego Wpisz poprawne lub
+niepoprawne
+Wpisz TAK, jeżeli
+została wykonana
+potrzebna
+naprawa
+4 X4:6/L-
+Napięcie na wyjściach sygnałowych czujnika
+Napięcie [V] Określenie poprawności
+wyniku pomiaru
+Wpisz TAK, jeżeli
+Oznaczenie
+elementu
+została wykonana
+potrzebna
+Stan
+nieaktywny
+Stan
+aktywny
+Wpisz poprawny lub
+niepoprawny
+naprawa
+5 B1:BK/L-
+ELM.08 105
+Wskazania dla ośrodków egzaminacyjnych
+dotyczące przygotowania stanowisk egzaminacyjnych do części praktycznej egzaminu
+Oznaczenie i nazwa kwalifikacji: ELM.08 Eksploatacja i programowanie systemów robotyki
+Jeśli we wskazaniach znajduje się Załącznik nr 2, należy zwrócić na niego szczególną uwagę przy
+przygotowywaniu stanowiska egzaminacyjnego.
+Opis wyposażenia ośrodka egzaminacyjnego
+1. Miejsce egzaminowania – pomieszczenie wyposażone w jednoosobowe stanowiska egzaminacyjne
+zapewniające samodzielne wykonanie zadania egzaminacyjnego, spełniające wymagania wynikające
+z przepisów bezpieczeństwa i higieny pracy, ochrony przeciwpożarowej oraz ochrony środowiska.
+Tabela 1. Wyposażenie miejsca egzaminowania
+Lp. Wyposażenie dodatkowe i uzupełniające Jednostka
+miary Liczba
+1 Stolik i krzesła dla zespołu nadzorującego szt.
+w zależności od
+składu zespołu
+2 Stolik i krzesło dla egzaminatora szt. 1
+3 Stolik i krzesło dla obserwatora szt. 1
+4
+Tablica szkolna/plansza oraz kreda/pisak do zapisania
+czasu rozpoczęcia i zakończenia pracy zdających szt. 1
+5 Zegar szt. 1
+6 Apteczka szt. 1
+7 Kosz na odpadki szt. 1
+8 Długopis (zapasowy dla zdających) szt. wg potrzeb
+9 Identyfikator dla zdającego
+(wyłącznie z numerem stanowiska)
+szt.
+= liczbie
+zdających na
+zmianie
+10
+Identyfikator dla zespołu nadzorującego
+(wyłącznie z napisem: PRZEWODNICZĄCY ZESPOŁU
+NADZORUJĄCEGO lub EGZAMINATOR)
+szt. dla każdej osoby
+11
+Identyfikator dla obserwatora
+(wyłącznie z napisem: OBSERWATOR) szt. 1
+12
+Identyfikator dla asystenta technicznego
+(wyłącznie z napisem: ASYSTENT) szt. 1
+13
+Komputer stacjonarny lub laptop lub tablet
+z dostępem do Internetu, do dyspozycji
+egzaminatora do wprowadzenia ocen do systemu
+informatycznego
+szt. 1
+2. Opis stanowiska egzaminacyjnego
+W skład stanowiska egzaminacyjnego wchodzi:
+− indywidualne stanowisko do pisania – biurko lub stolik i krzesło,
+− indywidualne stanowisko komputerowe – komputer z oprogramowaniem,
+− indywidualne zrobotyzowane stanowisko – do montażu układu oraz programowania i konfiguracji
+systemów zrobotyzowanych,
+− pole magazynowe na narzędzia i elementy.
+Każde stanowisko wyposażone powinno być w robota przemysłowego, do którego jest zamocowana
+pozioma płyta montażowa o wymiarach minimum 500×800 mm.
+1
+ELM.08 105
+Do zrobotyzowanego stanowiska powinny być doprowadzone następujące media:
+− źródło napięcia zmiennego jednofazowego 230 V/50 Hz (min. trzy gniazda). Przyłącze powinno być
+umieszczone w skrzynce rozdzielczej NN wyposażonej w zabezpieczenia różnicowo-prądowe
+i nadmiarowo-prądowe, wyłącznik główny, wskaźniki napięcia (lampki sygnalizacyjne). Na zewnątrz
+skrzynki powinien być umieszczony w widocznym miejscu wyłącznik awaryjny.
+− sprężone powietrze
+I. Wyposażenie niezbędne do wykonania zadania
+Tabela 2. Wyposażenie stanowiska egzaminacyjnego dla 1 zdającego
+Lp. Nazwa Istotne funkcje - parametry
+techniczno-eksploatacyjne/uwagi
+Jednostk
+a miary Liczba
+Stanowisko zrobotyzowane
+1 Robot
+2 Chwytak pneumatyczny
+dwustronnego działania 3 Sterownik PLC
+liczba osi – 6;
+przestrzeń robocza:
+zasięg robota minimum 400 mm
+przenoszone obciążenie minimalnie 0,5 kg;
+kontroler robota z oprogramowaniem,
+minimum osiem wejść, osiem wyjść cyfrowych
+programator ręczny (teach pendant),
+oprogramowanie narzędziowe do
+programowania robota – licencja w języku
+polskim lub angielskim – 1 szt.;
+z możliwością programowania jak w robocie
+przemysłowym
+minimalny zakres od 20 do 50 mm; minimum:
+8 wejść cyfrowych / 6 wyjść cyfrowych;
+2 wejścia analogowe z możliwością
+konfiguracji zakresów lub 4 wejścia
+analogowe:
+2 wejścia analogowe 0÷10 V
+i 2 wejścia 4÷20 mA.
+2 wyjścia analogowe z możliwością
+konfiguracji
+zakresów lub 4 wyjścia analogowe: 2 wyjścia
+analogowe 0÷10 V i 2 wyjścia 4÷20 mA;
+zasilanie 24 V DC;
+spełniający wymagania norm:
+IEC 61131- 1, IEC 61131-2, IEC 61131-3;
+szt. 1
+szt. 1
+szt. 1
+Urządzenia, aparaty elektryczne
+4 Przycisk sterowniczy1) 5 Przycisk sterowniczy1) 6 Lampka sygnalizacyjna1) 7 Lampka sygnalizacyjna1) 8 Zasilacz napięcia stałego zestyk NO; monostabilny; wciskany;
+montowany na szynie TH35; zestyk NC; monostabilny; wciskany;
+montowany na szynie TH35; napięcie znamionowe 24 V DC;
+montaż na szynie TH35; kolor czerwony; napięcie znamionowe 24 V DC; montaż na
+szynie TH35; kolor zielony; 24 V DC; prąd wyjściowy min. 4 A montowany
+na szynie TH35; szt. 1
+szt. 2
+szt. 1
+szt. 2
+szt. 1
+2
+9 Przenośnik taśmowy
+10
+Czujnik zbliżeniowy2)
+z uchwytem
+montażowym
+11
+Czujnik optyczny2)
+z uchwytem
+montażowym
+ELM.08 105
+z możliwością przyłączenia do kontrolera
+robota lub sterownika PLC, z możliwością
+wysterowania załączenia i zmiany kierunku;
+możliwość regulacji prędkości za pomocą
+potencjometru;
+wyposażony w końcowy pozycjoner
+transportowanego detalu, z możliwością jego
+demontażu;
+taśma transportera o długości minimum
+400 mm i szerokości minimum 50 mm;
+z możliwością montażu i regulacji położenia
+czujników z Wyposażenia nad taśmociągiem;
+napęd 24 V DC lub z wbudowanym układem
+sterowania z sygnałami logicznymi sterującymi
+ruchem w logice 24 V DC, PNP zgodnie z tabelą
+prawdy;
+szt. 1
+Sygnał sterujący
+przenośnikiem
+Ruch
+przenośnika [V] DC
+START/STOP START 24
+STOP 0
+LEWO/PRAWO LEWO 0
+PRAWO 24
+pojemnościowy; napięcie zasilania 24 V DC;
+PNP NO; 3-przewodowy; kabel o długości
+min. 1,5 m, końcówki przewodów kabla
+zakończone tulejkami zaciskowymi;
+cylindryczny gwintowany; z dwiema
+nakrętkami; nominalna strefa działania min.
+2 mm; oznaczenia wyprowadzeń: BU, BN,
+BK
+szt. 2
+odbiciowy osiowy; napięcie zasilanie 24 V
+DC;
+PNP NO; 3-przewodowy; kabel o długości
+min. 1 m, końcówki przewodów kabla
+zakończone tulejkami zaciskowymi;
+cylindryczny gwintowany; z dwiema
+nakrętkami; oznaczenia
+wyprowadzeń: BU, BN, BK szt. 2
+3
+ELM.08 105
+12
+Czujnik zbliżeniowy
+z uchwytem
+montażowym
+indukcyjny; napięcie zasilania 24 V DC; PNP
+NO; 3-przewodowy; kabel o długości min.
+1,5 m, końcówki przewodów kabla
+zakończone tulejkami zaciskowymi;
+cylindryczny gwintowany; z dwiema
+nakrętkami; nominalna strefa działania min.
+2 mm;
+oznaczenia wyprowadzeń: BU, BN, BK szt. 1
+13 Przekaźnik
+elektromagnetyczny
+cewka 24 V DC; min. 2 zestyki przełączne;
+sygnalizacja zadziałania; przycisk testujący;
+montaż na szynie TH35
+szt. 3
+Elektronarzędzia, narzędzia, sprzęt, osprzęt
+14 Wkrętaki izolowane płaskie i krzyżowe kpl 1
+15 Klucze płaskie 5÷19 mm kpl. 1
+16 Klucze imbusowe 1÷10 mm kpl. 1
+17 Szczypce boczne tnące długość min. 160 mm szt. 1
+18 19 Praska do zaciskania
+końcówek tulejkowych Ściągacz izolacji 0,5÷2,5 mm2 szt. 1
+szt. 1
+20 Złączka na szynę TH353)
+niebieska; przelotowa; 1-poziomowa;
+4-przewodowa;
+przekrój przewodu 2,5 mm2
+np. WeidmullerSAK 4/EN niebieska
+(0467460000), WAGO 2002-1204)
+szt. 8
+21 Złączka na szynę TH353)
+czerwona; przelotowa; 1-poziomowa;
+4-przewodowa;
+przekrój przewodu 2,5 mm2 (np.
+WeidmullerSAK 4/EN czerwona (0467460000),
+WAGO 2002-1203)
+szt. 8
+22 Złączka na szynę TH353)
+szara; przelotowa;
+1-poziomowa; 4-przewodowa;
+przekrój przewodu 2,5 mm2
+szt. 16
+23 Złączka na szynę TH353)
+beżowa; przelotowa;
+1-poziomowa; 4-przewodowa;
+przekrój przewodu 2,5 mm2
+szt. 16
+24 Mostek wtykany do złączek3) niebieski; 4-biegunowy; szt. 2
+25 Mostek wtykany do złączek3) czerwony; 4-biegunowy; szt. 2
+26 Ścianka końcowa do złączek3) do złączek 4-przewodowych ze specyfikacji szt. 12
+27 Blokada końcowa do złączek
+na szynę
+(np. Weidmüller EW 35 0383560000
+lub 9540000000 lub WAGO 249-116) szt. 4
+4
+ELM.08 105
+Urządzenia pneumatyczne
+5/2 bistabilny;
+napięcie zasilania cewek 24 V DC;
+28
+Pneumatyczny
+elektrozawór
+rozdzielający
+szt. 1
+możliwość montażu do płyty/stołu
+ciśnienie robocze 0÷10 bar; montowany na
+przewodach, pokrętło regulacyjne
+29 Zawór
+dławiąco-zwrotny
+szt. 2
+3/2 montowany na przewodzie lub do
+płyty/stołu
+30 Pneumatyczny zawór
+odcinająco-odpowietrzający
+szt. 1
+31 Zespół przygotowania
+sprężonego powietrza
+zawór odcinający, filtr, manometr,
+zawór redukcyjny,
+możliwość montażu do płyty/stołu
+szt 1
+32 Szybkozłącza pneumatyczne
+dostosowane do elementów pneumatycznych
+wymienionych w specyfikacji i do średnicy
+przewodów będących w wyposażeniu ośrodka
+szt. 10
+33 Tłumik hałasu dostosowany do posiadanych zaworów szt. 6
+Modele detali (kolory modeli przykładowe)
+34
+Model 1
+Detal nr 1 – sześcian foremny
+o boku 25 mmm niemetalowy
+Nie wytwarzać w kolorze
+czarnym, żeby nie było
+problemów ze współpracą
+z czujnikiem optycznym
+szt. 12
+35
+Model 3
+Magazyn detali;
+materiał dowolny
+niemetalowy, zalecany druk
+3D
+szt. 1
+5
+36
+37
+38
+39
+40
+ELM.08 105
+Model 5
+Paleta 1;
+materiał dowolny
+niemetalowy, zalecany druk
+3D
+szt. 1
+Model 6
+Paleta 2 z dwoma rodzajami
+otworów
+materiał dowolny, zalecany
+druk 3D
+szt. 1
+Model 7
+Paleta 3;
+materiał dowolny
+niemetalowy, zalecany druk
+3D
+szt. 1
+Model 8
+Detal nr 2 – walec metalowy;
+materiał wykrywany przez
+czujnik indukcyjny.
+W przypadku wydruku 3D
+można skorzystać
+dołączonego pliku .stl,
+a w spodni wpust włożyć na
+wcisk lub przykleić metalową
+nakrętkę M6.
+szt. 2
+Model 9
+Detal nr 3 – walec
+niemetalowy;
+materiał niewykrywany przez
+czujnik indukcyjny
+szt. 4
+6
+41
+42
+43
+44
+45
+ELM.08 105
+Model 10
+Przeszkoda;
+materiał dowolny, zalecany
+druk 3D
+szt. 2
+Model 11
+Pojemnik;
+materiał dowolny, zalecany
+druk 3D
+szt. 2
+Model 12
+Magazyn opadowy
+Wykonany z plastiku, metalu
+lub tektury, zalecany wydruk
+3D
+szt. 1
+Model 13
+Wałek nr 1
+materiał dowolny, zalecany
+druk 3D
+szt. 1
+Model 14
+Wałek nr 2
+materiał dowolny, zalecany
+druk 3D
+szt. 1
+7
+46
+47
+48
+49
+50 Model 15
+Pierścień nr 1
+materiał dowolny, zalecany
+druk 3D
+Model 16
+Pierścień nr 2
+materiał dowolny, zalecany
+druk 3D
+Model 17
+Narzędzie do umieszczenia
+w chwytaku. Narzędzie o
+podstawie możliwej do
+pobrania przez chwytak,
+zakończone ostro (średnica
+do 3 mm), o długości do 15
+cm
+Model 18
+Pisak do papieru i obudowa
+na pisak
+Model 19
+Magazyn narzędzi ELM.08 105
+szt. 2
+szt. 2
+szt. 1
+Przykładowy wygląd narzędzia, dostosowany
+do modelu 19
+szt. 1
+szt. 1
+8
+ELM.08 105
+51 Model 20 Magazyn detalu
+obrabianego szt. 1
+52 Model 21 Magazyn
+elementów szt. 1
+Aparatura kontrolno-pomiarowa
+53 Multimetr cyfrowy pomiar U, I (AC i DC), R, tester ciągłości
+obwodu; ręczna zmiana zakresów. szt. 1
+54 Stoper minimalny zakres od 0 do 60 s szt. 1
+55 Suwmiarka uniwersalna noniuszowa o działce elementarnej 0,05 mm szt. 1
+Komputery, peryferia
+56 Komputer z monitorem
+z zainstalowanym systemem operacyjnym
+i oprogramowaniem do programowania
+posiadanego robota oraz oprogramowaniem
+do programowania sterowników PLC ze
+specyfikacji; w języku LD i FBD;
+posiadający klawiaturę, myszkę oraz
+szeregowe porty umożliwiające komunikację
+z posiadanym robotem i sterownikiem PLC
+kpl. 1
+57 Środki ochrony indywidualnej
+58 Okulary ochronne szt. 1
+1) W przypadku posiadania przez ośrodek elementów z innymi oznaczeniami należy w trwały i widoczny
+sposób je oznaczyć zgodnie z opisem zacisków w kolumnie 3.
+2) W przypadku posiadania przez ośrodek elementów z innymi oznaczeniami należy w trwały i widoczny
+sposób je oznaczyć zgodnie z opisem wyprowadzeń w kolumnie 3.
+3) Należy dopilnować, aby elementy były wzajemnie kompatybilne (np. tego samego producenta).
+9
+ELM.08 105
+Tabela 2a. Wyposażenie stanowiska wspólnego dla kilku zdających
+Lp. Nazwa Istotne funkcje - parametry
+techniczno-eksploatacyjne/uwagi
+Jednostka
+miary Liczba zdających
+Dla ilu
+Maszyny/inne właściwe dla kwalifikacji
+1 Sprężarka
+ciśnienie wyjściowe min. 6 bar,
+max 10 bar, wydajność
+dostosowana do liczby stanowisk
+egzaminacyjnych w sali
+egzaminacyjnej,
+szt. 1
+Tabela 3. Materiały zużywane w całości do wykonania zadania praktycznego dla 1 zdającego
+(tylko w przypadku zadania z usuwaniem błędów)
+Orientacyjna
+Szacunkowy
+Lp.
+Nazwa materiału/podzespołu/ części
+/elementu zamiennego/ surowca/
+cena
+koszt dla
+Jednostka
+Ilość dla
+jednostkowa
+1 zdającego
+miary
+1 zdającego
+półproduktu
+zł
+zł
+1 Końcówki tulejkowe 2 Przewód LgY 1 mm2 w izolacji koloru
+czarnego
+3 Przewód LgY 1 mm2 w izolacji koloru
+niebieskiego 4 Przewód LgY 1 mm2 w izolacji koloru
+brązowego 5 Rysunek nr 4, jeśli jest w załączniku
+numer 2a szt. 10 m 2 0,10 1,00 1,00
+2,00
+m 1 m 1 szt. 1,00 1,00 1 1,00 1,00
+1,00
+1,00
+Razem brutto 6,00
+Tabela 3a. Materiały wielokrotnie wykorzystywane przez zdających na 1 stanowisku
+Szacunkowy
+Orientacyjna
+Nazwa materiału/podzespołu/
+koszt dla
+Lp.
+części /elementu zamiennego/
+Jednostka
+miary Ilość zdających
+Dla ilu
+cena
+1 zdającego
+surowca/ półproduktu
+jednostkowa
+zł
+zł
+1
+Razem brutto*
+Tabela 3b. Materiały potrzebne do przygotowania jednego stanowiska egzaminacyjnego przez
+ośrodek egzaminacyjny
+Szacunkowy koszt
+Nazwa
+Ilość dla
+materiału/podzespołu/ części
+Jednostka
+Orientacyjna
+cena
+dla
+Lp.
+1
+1 stanowiska
+/elementu zamiennego/
+surowca/ półproduktu
+miary
+stanowiska
+jednostkowa
+zł
+zł
+1 Szyna TH35 35x7,5
+perforowana m 1 12,00 12,00
+2 Korytko grzebieniowe 40x40 m 1,5 8,00 12,00
+3 Przewód LgY 1 mm2
+niebieski -
+m 5 1,00 5,00
+4 Przewód LgY 1 mm2
+czarny
+5 Przewód LgY 1 mm2
+brązowy -
+-
+m 10 1,00 10,00
+m 10 10
+1,00 10,00
+ELM.08 105
+6 Końcówki tulejkowe 1 mm2 szt. 60 0,10 6,00
+7 Diody prostownicze 1 A,
+np. 1N4007s szt. 8 1,00 8,00
+Razem brutto 63,00
+Uwaga!.
+Zalecane jest, aby asystent techniczny posiadał uprawnienia w zakresie eksploatacji urządzeń i sieci
+elektrycznych do 1 kV.
+II. Wskazówki/informacje dotyczące przygotowania stanowisk egzaminacyjnych
+Na każdym stanowisku egzaminacyjnym należy:
+Przygotować poziomą płytę montażową do robota i zamocować do płyty w sposób trwały wszystkie
+zaznaczone na rysunku 1. elementy układu (wymiary na rysunku minimalne).
+Stanowisko jest uniwersalne i może zawierać elementy niewykorzystywane w danym zadaniu.
+Rysunek 1. Rozmieszczenie szyn i osprzętu na płycie montażowej (widok z góry)
+Pozostałe elementy z tabeli 2, niewykorzystane do montażu, zgromadzić obok stanowiska. Ponadto:
+1. 2. 3. Zasilanie 230 V AC przeznaczone do zasilania zasilacza 24 V DC należy połączyć bezpośrednio
+do zacisków zasilacza L1, N, PE przewodem zakończonym wtyczką sieciową.
+Należy odłączyć zasilacz robota od zasilania napięciem 230 V DC.
+Opisać symbolami elementy: S1,S2, H1,H2,H3, B1,B2, B3, B4, B5 oraz listwy zaciskowe X1, X2,
+X3, X4, X5, X6 i poszczególne złączki.
+11
+ELM.08 105
+4. Na listwie przyłączeniowej X3 należy ponumerować INPUT 1 ÷ 8 – wejścia cyfrowe robota
+5. Na listwie przyłączeniowej X4. należy ponumerować OUTPUT 1 ÷ 8 – wyjścia cyfrowe robota
+6. Na listwie przyłączeniowej X5. należy opisać wejścia cyfrowe PLC – I0.0 ÷ I0.7
+7. Na listwie przyłączeniowej X6 należy opisać wyjścia cyfrowe PLC – Q0.0 ÷ Q0.7.
+8. Przetestować i dostosować uchwyty montażowe elementów otoczenia robota oraz uchwyty
+sensorów do doposażenia, którym dysponuje ośrodek egzaminacyjny;
+9. Na przygotowanym stanowisku należy wykonać połączenia elektryczne zgodnie ze schematem
+przedstawionym na rysunku 2 i 3. Przewodem LgY 1 mm2 w izolacji niebieskiej wykonać
+połączenia o potencjale 0 V (L -, GND), w izolacji brązowej połączenia zasilania +24 V DC,
+a przewodów w izolacji czarnej użyć jako połączenia sygnałowe.
+10. Podłączone elektrycznie sensory B1, B2, B3, B4, B5 należy odłożyć np. do tyłu stanowiska
+zrobotyzowanego, będą montowane mechanicznie do otoczenia robota w zależności od rodzaju
+realizowanego zadania.
+11. Robot powinien mieć zainstalowany chwytak pneumatyczny sterowany elektrozaworem
+5/2 bistabilnym sterowany dwoma sygnałami ON – otwórz X4:OUT 11(Y1), OFF – zamknij X4:OUT
+12 (Y2). Zakres pracy chwytaka od 20 do 35 mm;
+12. Należy podłączyć kabel sygnałowy zakończony wtyczką, służący do sterowania przenośnika
+taśmowego (X4:OUT13 – START/STOP przenośnika, X4:OUT14 – PRAWO/LEWO kierunku
+przenośnika) Jeśli zaistnieje konieczność umieszczenia przenośnika taśmowego na stanowisku
+egzaminacyjnym, będzie to zawarte w załączniku nr 2.;
+13. W niektórych zadaniach będzie konieczność celowego wykonania usterek w systemie
+zrobotyzowanym. Informacja taka zostanie podana w Załączniku nr 2.
+14. Na rysunku 1 podane są minimalne wymagania wymiarów poziomej płyty montażowej oraz
+minimalnego wymaganego zakresu pracy robota. Jeżeli ośrodek egzaminacyjny dysponuje
+większą płytą montażową lub robotem o większym zasięgu należy sprawdzić czy robot osiągnie
+zdefiniowany minimalny zasięg (będzie w stanie osiągnąć punkty w przestrzeni).
+15. Pozioma płyta montażowa powinna być wykonana z aluminium lub stali. Jeżeli ośrodek
+egzaminacyjny nie dysponuje taką płytą można zastosować alternatywną płytę, np. z płyty
+meblowej lub sklejki.
+16. Specyfika egzaminu oraz zadań wymaga od zdającego swobodnego dostępu do robota.
+17. Należy podłączyć obwód bezpieczeństwa robota.
+18. Na stanowisku zrobotyzowanym należy umieścić wypełnioną tabelę przypisania sygnałów
+(załącznik 1) oraz dokumentację techniczną robota (w formie papierowej lub elektronicznej).
+19. Na stanowisku zrobotyzowanym należy umieścić z dokumentację techniczną ze współrzędnymi
+punktu TCP narzędzia (chwytaka).
+12
+ELM.08 105
+D1 ÷ D5 – diody prostownicze 1 A, np. 1N4007s
+Rysunek 2. Schemat podłączeń elektrycznych systemu zrobotyzowanego
+Uwaga:
+Zalecane jest, aby asystent techniczny posiadał uprawnienia w zakresie montażu i
+eksploatacji urządzeń i sieci elektrycznych do 1kV.
+13
+ELM.08 105
+D6 ÷ D8 – diody prostownicze 1 A, np. 1N4007
+Rysunek 3. Schemat podłączenia do sterownika PLC
+W przypadku posiadania sterownika PLC o innej adresacji niż widoczna na rysunku 3 (wejścia cyfrowe
+I0.0, I0.1,….., wyjścia cyfrowe Q0.0, Q0.1,….), należy umieścić na stanowisku egzaminacyjnym informację
+o tejże różnicy. Można wykonać to poprzez użycie zapisu „Do złączki X5 podłączono w odpowiedniej
+kolejności wejścia cyfrowe sterownika PLC zaczynając od I1, a do złączki X6 podłączono w odpowiedniej
+kolejności wyjścia cyfrowe sterownika PLC zaczynając od Q1”.
+14
+ELM.08 105
+Załącznik nr 1
+TABELA PRZYPISANIA SYGNAŁÓW NA STANOWISKU ZROBOTYZOWANYM
+Operand
+symboliczny
+Operand
+absolutny Opis
+X3:1 przycisk sterowniczy S1, NO
+wejścia cyfrowe robota
+X3:2 przycisk sterowniczy S2, NC
+X3:3 czujnik pojemnościowy B1, PNP
+X3:4 czujnik pojemnościowy B2, PNP
+X3:5 czujnik optyczny B3, PNP
+X3:6 czujnik optyczny B4, PNP
+X3:7 czujnik indukcyjny B5, PNP
+X3:8 styk NO przekaźnika K3
+X4:1 lampka sygnalizacyjna zielona H1
+wyjścia cyfrowe robota
+X4:2 lampka sygnalizacyjna czerwona H2
+X4:3 lampka sygnalizacyjna zielona H3
+X4:4 chwytak ON
+X4:5 chwytak OFF
+X4:5 przenośnik taśmowy START/STOP
+X4:7 przenośnik taśmowy PRAWO/LEWO
+X4:8
+Należy wpisać operand absolutny dla zastosowanego robota.
+Uzupełnioną tabelę przypisania sygnałów należy umieścić na stanowisku egzaminacyjnym.
+15
+ELM.08 105
+Załącznik nr 2
+Po przygotowaniu stanowiska jak w punkcie II. Wskazówki/informacje dotyczące przygotowania stanowisk
+egzaminacyjnych wykonać poniższe czynności.
+Zamocować do płyty w sposób trwały wszystkie zaznaczone na rysunku 4 elementy otoczenia systemu
+zrobotyzowanego (wymiary na rysunku orientacyjne).
+Rysunek 4. Rozmieszczenie otoczenia systemu zrobotyzowanego (widok z góry)
+1. Zamontować na płycie poziomej robota przenośnik taśmowy.
+2. Zamontować na płycie poziomej robota magazyn opadowy (model 12 z tabeli 2).
+3. Napełnić magazyn opadowy czteroma detalami (model 1 detal nr1 z tabeli 2).
+4. Zamontować na płycie montażowej model palety 2x2 (model 7 paleta 3 z tabeli 2).
+5. Czujnik optyczny B3 skalibrować tak, aby identyfikował detal w położeniu początkowym na przenośniku
+taśmowym zgodnie z rysunkiem 4.
+6. Czujnik pojemnościowy B1 zamontować na pozycjonerze przenośnika taśmowego zgodnie z rysunkiem
+4 (nie kalibrować czujnika pojemnościowego B1).
+7. Ustawić małą prędkość przesuwania taśmy przenośnika w lewą stronę w kierunku od czujnika B3 do
+czujnika B1.
+8. Na przygotowanym stanowisku należy wykonać modyfikację połączeń elektrycznych zgodnie ze
+schematem przedstawionym na rysunku 5.
+9. Aktywować obwód bezpieczeństwa robota.
+16
+ELM.08 105
+Rysunek 5. Schemat podłączeń elektrycznych systemu zrobotyzowanego
+Należy wykonać następującą modyfikację połączeń elektrycznych w stosunku do schematu
+zamieszonego we wskazaniach do zdania:
+− Połączenie H1:X1/X4:1 narysowane kolorem czerwonym należy wykonać tak, aby pomiar
+ciągłości wskazywał przerwę w połączeniu pomiędzy punktami zaciskowymi łączonych
+elementów.
+17
