@@ -2,12 +2,15 @@ import Editor, { type Monaco, type OnMount } from "@monaco-editor/react";
 import type { editor as MonacoEditorType } from "monaco-editor";
 import { useEffect, useRef, useState } from "react";
 import { RobotScene } from "./RobotScene";
+import { TaskDetailsModal } from "./TaskDetailsModal";
+import { LessonLectureModal } from "./LessonLectureModal";
+import { QuizView } from "./QuizView";
 import { moveCPosition } from "./motion";
 import { blankProjectCode, compile, evaluateExpression, examples, formatTPWrite, tasks, targetNamesInCode, targets, type Command, type ExecutionStatus, type SignalMap, type StudentProject, type Task, type ToolKind } from "./rapid";
-import { clampToReach, defaultTablePosition, defaultTcp, getFloorZ, isReachable, robotReach, tableConfig, type BlockItem, type SceneSnapshot } from "./robotConfig";
+import { clampToReach, conveyorConfig, defaultTablePosition, defaultTcp, defaultWorkObjects, getFloorZ, isOverConveyor, isReachable, robotReach, tableConfig, type BlockItem, type SceneSnapshot } from "./robotConfig";
 
-const initialInputs: SignalMap = { diStart: false, diPartPresent: false, diReset: false, diSafetyOk: true };
-const initialOutputs: SignalMap = { doReady: false, doGripper: false, doBusy: false, doComplete: false };
+const initialInputs: SignalMap = { S1: false, diStart: false, diPartPresent: false, diReset: false, diSafetyOk: true };
+const initialOutputs: SignalMap = { H1: false, doReady: false, doGripper: false, doBusy: false, doComplete: false };
 const initialPose = defaultTcp;
 const initialBlock: [number, number, number] = targets.pGripPick;
 const projectsKey = "rapid-sim-student-projects";
@@ -21,17 +24,138 @@ function loadProjects(): StudentProject[] {
 
 function Status({ status }: { status: ExecutionStatus }) { return <span className={`status ${status.replaceAll(" ", "-").toLowerCase()}`}>{status}</span>; }
 
+
+function getSignalValue(map: SignalMap, key: string): boolean | undefined {
+  if (key in map) return map[key];
+  const found = Object.entries(map).find(([k]) => k.toLowerCase() === key.toLowerCase());
+  return found ? found[1] : undefined;
+}
+
+function setSignalValue(map: SignalMap, key: string, value: boolean): SignalMap {
+  const existingKey = Object.keys(map).find((k) => k.toLowerCase() === key.toLowerCase());
+  return { ...map, [existingKey || key]: value };
+}
+
+function extractSignalsFromCode(codeText: string, task?: Task): { inputs: SignalMap; outputs: SignalMap } {
+  const inputMap: SignalMap = task?.defaultInputs ? { ...task.defaultInputs } : { ...initialInputs };
+  const outputMap: SignalMap = task?.defaultOutputs ? { ...task.defaultOutputs } : { ...initialOutputs };
+
+  if (task?.category === "elm08") {
+    if (!("S1" in inputMap)) inputMap["S1"] = false;
+  }
+
+  // Scan code for WaitDI <sig>
+  for (const m of codeText.matchAll(/\bWaitDI\s+([A-Za-z_]\w*)/gi)) {
+    const name = m[1];
+    if (!(name in inputMap)) inputMap[name] = false;
+  }
+
+  // Scan code for DInput(<sig>)
+  for (const m of codeText.matchAll(/\bDInput\s*\(\s*([A-Za-z_]\w*)\s*\)/gi)) {
+    const name = m[1];
+    if (!(name in inputMap)) inputMap[name] = false;
+  }
+
+  // Scan code for conditions on known inputs: S1..S9, B1..B9
+  for (const m of codeText.matchAll(/\b([SB]\d+)\s*=/gi)) {
+    const name = m[1];
+    if (!(name in inputMap)) inputMap[name] = false;
+  }
+
+  // Scan code for Set <sig>, Reset <sig>
+  for (const m of codeText.matchAll(/\b(?:Set|Reset)\s+([A-Za-z_]\w*)/gi)) {
+    const name = m[1];
+    if (!(name in outputMap)) outputMap[name] = false;
+  }
+
+  // Scan code for PulseDO ... <sig>
+  for (const m of codeText.matchAll(/\bPulseDO\b[^;]*\b([A-Za-z_]\w*)\s*;/gi)) {
+    const name = m[1];
+    if (!(name in outputMap)) outputMap[name] = false;
+  }
+
+  // Scan code for WaitDO <sig>
+  for (const m of codeText.matchAll(/\bWaitDO\s+([A-Za-z_]\w*)/gi)) {
+    const name = m[1];
+    if (!(name in outputMap)) outputMap[name] = false;
+  }
+
+  // Scan code for DOutput(<sig>)
+  for (const m of codeText.matchAll(/\bDOutput\s*\(\s*([A-Za-z_]\w*)\s*\)/gi)) {
+    const name = m[1];
+    if (!(name in outputMap)) outputMap[name] = false;
+  }
+
+  return { inputs: inputMap, outputs: outputMap };
+}
+
 export function App() {
+  const [viewMode, setViewMode] = useState<"simulator" | "quiz">("simulator");
   const [sidebarTab, setSidebarTab] = useState<"lessons" | "tasks">("lessons");
   const [selected, setSelected] = useState(examples[0]);
   const [selectedTask, setSelectedTask] = useState<Task>();
+  const [viewingTask, setViewingTask] = useState<Task | undefined>();
+  const [viewingLecture, setViewingLecture] = useState<typeof examples[number] | undefined>();
   const [code, setCode] = useState(examples[0].code);
   const [projectName, setProjectName] = useState("Moj program");
+  const [speedOverride, setSpeedOverride] = useState<number>(100);
+  const [showConveyor, setShowConveyor] = useState<boolean>(true);
+  const [showGravityFeeder, setShowGravityFeeder] = useState<boolean>(true);
+  const isStepMode = useRef<boolean>(false);
+  const decorationsRef = useRef<string[]>([]);
+
+
+  const updateProgramPointer = (line?: number) => {
+    if (!monacoEditorRef.current || !monacoRef.current) return;
+    const editor = monacoEditorRef.current;
+    if (!line) {
+      decorationsRef.current = editor.deltaDecorations(decorationsRef.current, []);
+      return;
+    }
+    decorationsRef.current = editor.deltaDecorations(decorationsRef.current, [
+      {
+        range: new monacoRef.current.Range(line, 1, line, 1),
+        options: {
+          isWholeLine: true,
+          className: "pp-line-highlight",
+          glyphMarginClassName: "pp-glyph-margin",
+          overviewRuler: {
+            color: "#edaa39",
+            position: monacoRef.current.editor.OverviewRulerLane.Full,
+          },
+        },
+      },
+    ]);
+    editor.revealLineInCenterIfOutsideViewport(line);
+  };
+
   const [savedProjects, setSavedProjects] = useState<StudentProject[]>(loadProjects);
   const [status, setStatus] = useState<ExecutionStatus>("Ready");
   const [consoleLines, setConsoleLines] = useState<string[]>(["RAPID Sim gotowy. Wybierz lekcje lub zadanie i uruchom program."]);
   const [inputs, setInputs] = useState<SignalMap>(initialInputs);
   const [outputs, setOutputs] = useState<SignalMap>(initialOutputs);
+  const inputsRef = useRef<SignalMap>(initialInputs);
+  const outputsRef = useRef<SignalMap>(initialOutputs);
+
+  useEffect(() => {
+    inputsRef.current = inputs;
+  }, [inputs]);
+
+  useEffect(() => {
+    outputsRef.current = outputs;
+  }, [outputs]);
+
+  // Sync signals on initial mount
+  useEffect(() => {
+    const { inputs: initIn, outputs: initOut } = extractSignalsFromCode(code, selectedTask);
+    setInputs(initIn);
+    inputsRef.current = initIn;
+    setOutputs(initOut);
+    outputsRef.current = initOut;
+  }, []);
+
+  
+
   const [tool, setTool] = useState<ToolKind>("pen");
   const [showTable, setShowTable] = useState(true);
   const [tablePosition, setTablePosition] = useState<[number, number]>(defaultTablePosition);
@@ -118,8 +242,41 @@ export function App() {
   };
 
   const handleCodeChange = (value?: string) => {
-    setCode(value ?? "");
+    const newCode = value ?? "";
+    setCode(newCode);
     clearEditorMarkers();
+
+    const { inputs: codeInputs, outputs: codeOutputs } = extractSignalsFromCode(newCode, selectedTask);
+    setInputs((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(codeInputs)) {
+        if (!(k in next)) {
+          next[k] = v;
+          changed = true;
+        }
+      }
+      if (changed) {
+        inputsRef.current = next;
+        return next;
+      }
+      return prev;
+    });
+    setOutputs((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const [k, v] of Object.entries(codeOutputs)) {
+        if (!(k in next)) {
+          next[k] = v;
+          changed = true;
+        }
+      }
+      if (changed) {
+        outputsRef.current = next;
+        return next;
+      }
+      return prev;
+    });
   };
 
   const log = (message: string) => setConsoleLines((items) => [...items, `> ${message}`]);
@@ -215,21 +372,38 @@ export function App() {
     trailRef.current = next;
     setTrail(next);
   };
-  const reset = () => {
+  const reset = (activeTask?: Task) => {
     clearTimer();
     clearAllDropTimers();
     cancelled.current = true;
     pc.current = 0;
     tcpRef.current = initialPose;
     heldBlockIdRef.current = null;
-    const resetBlocks: BlockItem[] = [{ id: "block-1", position: initialBlock }];
+    const resetBlocks: BlockItem[] = activeTask?.blocks
+      ? activeTask.blocks.map((b) => ({ ...b, position: [...b.position] as [number, number, number] }))
+      : [{ id: "block-1", position: initialBlock }];
     blocksRef.current = resetBlocks;
+    if (activeTask) {
+      targetPositionsRef.current = { ...targets, ...targetPositionsRef.current };
+      targetPositionsRef.current.pPin1 = [...targets.pPin1];
+      targetPositionsRef.current.pPin2 = [...targets.pPin2];
+      targetPositionsRef.current.pPallet1 = [...targets.pPallet1];
+      targetPositionsRef.current.pPallet2 = [...targets.pPallet2];
+      targetPositionsRef.current.pPallet3 = [...targets.pPallet3];
+      targetPositionsRef.current.pPallet4 = [...targets.pPallet4];
+      setTargetPositions({ ...targetPositionsRef.current });
+    }
     tablePositionRef.current = defaultTablePosition;
     setTablePosition(defaultTablePosition);
     setTableEditing(false);
     setStatus("Ready");
-    setInputs(initialInputs);
-    setOutputs(initialOutputs);
+
+    const { inputs: newInputs, outputs: newOutputs } = extractSignalsFromCode(code, activeTask);
+    setInputs(newInputs);
+    inputsRef.current = newInputs;
+    setOutputs(newOutputs);
+    outputsRef.current = newOutputs;
+
     setTcp(initialPose);
     tcpPitchRef.current = -90;
     setTcpPitch(-90);
@@ -240,7 +414,7 @@ export function App() {
     setSelectedTarget(undefined);
     setTcpEditing(false);
     replaceTrail([]);
-    setActiveLine(undefined);
+    setActiveLine(undefined); updateProgramPointer(undefined); isStepMode.current = false;
     setAwaiting(undefined);
     variablesRef.current = {};
     undoStackRef.current = [];
@@ -269,7 +443,7 @@ export function App() {
         return;
       }
       const [bx, by, bz] = block.position;
-      const floorZ = getFloorZ(bx, by, showTableRef.current, tablePositionRef.current);
+      const floorZ = getFloorZ(bx, by, showTableRef.current, tablePositionRef.current, blocksRef.current, blockId);
       vz -= gravity * dt;
       let nextZ = bz + vz * dt;
       if (nextZ <= floorZ) {
@@ -404,104 +578,270 @@ export function App() {
 
   const execute = (command: Command) => {
     setActiveLine(command.line);
+    updateProgramPointer(command.line);
+
+    const finishCmd = (andNext: boolean = true) => {
+      if (isStepMode.current) {
+        setStatus("Paused");
+        isStepMode.current = false;
+      } else if (andNext) {
+        next();
+      }
+    };
+
+    if (command.type === "jump") {
+      pc.current = command.targetIndex;
+      finishCmd(true);
+      return;
+    }
+
+    if (command.type === "jumpIfFalse") {
+      const condVal = evaluateExpression(command.expr, {
+        variables: variablesRef.current,
+        targetLibrary: targetPositionsRef.current,
+        inputs: inputsRef.current,
+        outputs: outputsRef.current,
+      });
+      if (!condVal) {
+        pc.current = command.targetIndex;
+      }
+      finishCmd(true);
+      return;
+    }
+
     if (command.type === "log") {
       const text = formatTPWrite(command, {
         variables: variablesRef.current,
         targetLibrary: targetPositionsRef.current,
+        inputs: inputsRef.current,
+        outputs: outputsRef.current,
       });
       log(text);
-      next();
+      finishCmd(true);
       return;
     }
+
     if (command.type === "tpErase") {
       setConsoleLines([]);
-      next();
+      finishCmd(true);
       return;
     }
+
     if (command.type === "output") {
       if (command.signal === "doGripper") setGripperOutput(command.value);
-      else setOutputs((values) => ({ ...values, [command.signal]: command.value }));
-      log(`${command.value ? "Set" : "Reset"} ${command.signal}`); next(); return;
+      else {
+        setOutputs((values) => ({ ...values, [command.signal]: command.value }));
+        outputsRef.current[command.signal] = command.value;
+      }
+      log(`${command.value ? "Set" : "Reset"} ${command.signal}`);
+      finishCmd(true);
+      return;
     }
+
+    if (command.type === "pulse") {
+      setOutputs((values) => ({ ...values, [command.signal]: true }));
+      outputsRef.current[command.signal] = true;
+      log(`PulseDO ${command.signal} (${command.length}s)`);
+      window.setTimeout(() => {
+        setOutputs((values) => ({ ...values, [command.signal]: false }));
+        outputsRef.current[command.signal] = false;
+      }, command.length * 1000);
+      finishCmd(true);
+      return;
+    }
+
     if (command.type === "increment") {
       const varKey = command.variable.toLowerCase();
       const step = command.stepExpr
-        ? evaluateExpression(command.stepExpr, { variables: variablesRef.current, targetLibrary: targetPositionsRef.current })
+        ? evaluateExpression(command.stepExpr, { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })
         : 1;
       const currentVal = typeof variablesRef.current[varKey] === "number" ? variablesRef.current[varKey] : 0;
       variablesRef.current[varKey] = currentVal + (Number(step) || 1);
       log(`Incr ${command.variable}`);
-      next();
+      finishCmd(true);
       return;
     }
+
     if (command.type === "decrement") {
       const varKey = command.variable.toLowerCase();
       const step = command.stepExpr
-        ? evaluateExpression(command.stepExpr, { variables: variablesRef.current, targetLibrary: targetPositionsRef.current })
+        ? evaluateExpression(command.stepExpr, { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })
         : 1;
       const currentVal = typeof variablesRef.current[varKey] === "number" ? variablesRef.current[varKey] : 0;
       variablesRef.current[varKey] = currentVal - (Number(step) || 1);
       log(`Decr ${command.variable}`);
-      next();
+      finishCmd(true);
       return;
     }
+
     if (command.type === "clear") {
       const varKey = command.variable.toLowerCase();
       variablesRef.current[varKey] = 0;
       log(`Clear ${command.variable}`);
-      next();
+      finishCmd(true);
       return;
     }
+
     if (command.type === "assign") {
       const varKey = command.variable.toLowerCase();
       const val = evaluateExpression(command.expr, {
         variables: variablesRef.current,
         targetLibrary: targetPositionsRef.current,
+        inputs: inputsRef.current,
+        outputs: outputsRef.current,
       });
       variablesRef.current[varKey] = val;
-      next();
+      finishCmd(true);
       return;
     }
+
     if (command.type === "add") {
       const varKey = command.variable.toLowerCase();
       const val = evaluateExpression(command.expr, {
         variables: variablesRef.current,
         targetLibrary: targetPositionsRef.current,
+        inputs: inputsRef.current,
+        outputs: outputsRef.current,
       });
       const currentVal = typeof variablesRef.current[varKey] === "number" ? variablesRef.current[varKey] : 0;
       variablesRef.current[varKey] = currentVal + (Number(val) || 0);
-      next();
+      finishCmd(true);
       return;
     }
-    if (command.type === "stop") { setStatus("Completed"); log("Program zatrzymany przez Stop."); return; }
-    if (command.type === "waitInput") {
-      if (inputs[command.signal] === command.value) { next(); return; }
-      setAwaiting({ signal: command.signal, value: command.value }); setStatus("Waiting for DI"); log(`Oczekiwanie: ${command.signal} = ${command.value ? 1 : 0}`); return;
+
+    if (command.type === "stop") {
+      setStatus("Completed");
+      updateProgramPointer(undefined);
+      log("Program zatrzymany przez Stop.");
+      return;
     }
-    if (command.type === "wait") { timer.current = window.setTimeout(next, command.seconds * 1000); return; }
+
+    if (command.type === "waitInput") {
+      const currentVal = getSignalValue(inputsRef.current, command.signal);
+      if (currentVal === undefined) {
+        setInputs((prev) => setSignalValue(prev, command.signal, false));
+        inputsRef.current = setSignalValue(inputsRef.current, command.signal, false);
+      }
+      if (currentVal === command.value) {
+        finishCmd(true);
+        return;
+      }
+      setAwaiting({ signal: command.signal, value: command.value });
+      setStatus("Waiting for DI");
+      log(`Oczekiwanie na sygnał DI: ${command.signal} = ${command.value ? 1 : 0}`);
+      return;
+    }
+
+    if (command.type === "waitOutput") {
+      if (outputsRef.current[command.signal] === command.value) {
+        finishCmd(true);
+        return;
+      }
+      setAwaiting({ signal: command.signal, value: command.value });
+      setStatus("Waiting for DI");
+      log(`Oczekiwanie: ${command.signal} = ${command.value ? 1 : 0}`);
+      return;
+    }
+
+    if (command.type === "wait") {
+      timer.current = window.setTimeout(() => finishCmd(true), command.seconds * 1000);
+      return;
+    }
+
     if (command.type === "move") {
       setTarget(command.target);
-      const destination = targetPositionsRef.current[command.target];
+      const baseDest = targetPositionsRef.current[command.target] || targets[command.target] || defaultTcp;
+      let destination: [number, number, number] = [...baseDest];
+      if (command.targetOffsetExpr) {
+        const dx = Number(evaluateExpression(command.targetOffsetExpr[0], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+        const dy = Number(evaluateExpression(command.targetOffsetExpr[1], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+        const dz = Number(evaluateExpression(command.targetOffsetExpr[2], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+        destination = [destination[0] + dx, destination[1] + dy, destination[2] + dz];
+      } else if (command.targetOffset) {
+        destination = [
+          destination[0] + command.targetOffset[0],
+          destination[1] + command.targetOffset[1],
+          destination[2] + command.targetOffset[2],
+        ];
+      }
+      if (command.wobj && defaultWorkObjects[command.wobj]) {
+        const wobj = defaultWorkObjects[command.wobj];
+        destination = [
+          destination[0] + wobj.uframe[0],
+          destination[1] + wobj.uframe[1],
+          destination[2] + wobj.uframe[2],
+        ];
+      }
+
+      let viaPosition: [number, number, number] = [0, 0, 0];
+      if (command.kind === "MoveC" && command.via) {
+        const baseVia = targetPositionsRef.current[command.via] || targets[command.via] || defaultTcp;
+        viaPosition = [...baseVia];
+        if (command.viaOffsetExpr) {
+          const dx = Number(evaluateExpression(command.viaOffsetExpr[0], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+          const dy = Number(evaluateExpression(command.viaOffsetExpr[1], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+          const dz = Number(evaluateExpression(command.viaOffsetExpr[2], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+          viaPosition = [viaPosition[0] + dx, viaPosition[1] + dy, viaPosition[2] + dz];
+        } else if (command.viaOffset) {
+          viaPosition = [
+            viaPosition[0] + command.viaOffset[0],
+            viaPosition[1] + command.viaOffset[1],
+            viaPosition[2] + command.viaOffset[2],
+          ];
+        }
+        if (command.wobj && defaultWorkObjects[command.wobj]) {
+          const wobj = defaultWorkObjects[command.wobj];
+          viaPosition = [
+            viaPosition[0] + wobj.uframe[0],
+            viaPosition[1] + wobj.uframe[1],
+            viaPosition[2] + wobj.uframe[2],
+          ];
+        }
+      }
+
       const start = tcpRef.current;
       const started = performance.now();
-      const duration = command.kind === "MoveJ" ? 650 : 950;
+      const dist = Math.hypot(destination[0] - start[0], destination[1] - start[1], destination[2] - start[2]);
+      const commandedSpeed = command.speed || (command.kind === "MoveJ" ? 250 : 100);
+      const speedFactor = Math.max(0.1, speedOverride / 100);
+      const duration = Math.max(250, (dist / (commandedSpeed * speedFactor)) * 1000);
+
       const animate = (now: number) => {
         if (cancelled.current) return;
         const ratio = Math.min((now - started) / duration, 1);
         const smooth = ratio * ratio * (3 - 2 * ratio);
-        const position = command.kind === "MoveC" && command.via
-          ? moveCPosition(start, targetPositionsRef.current[command.via], destination, smooth)
-          : [start[0] + (destination[0] - start[0]) * smooth, start[1] + (destination[1] - start[1]) * smooth, start[2] + (destination[2] - start[2]) * smooth] as [number, number, number];
-        tcpRef.current = position; setTcp(position); if (heldBlockIdRef.current) updateBlockPosition(heldBlockIdRef.current, position); appendTrailPoint(position, ratio === 1);
-        if (ratio < 1) timer.current = window.requestAnimationFrame(animate); else { log(`${command.kind} ${command.target}`); next(); }
+        const position = command.kind === "MoveC"
+          ? moveCPosition(start, viaPosition, destination, smooth)
+          : ([
+              start[0] + (destination[0] - start[0]) * smooth,
+              start[1] + (destination[1] - start[1]) * smooth,
+              start[2] + (destination[2] - start[2]) * smooth,
+            ] as [number, number, number]);
+        tcpRef.current = position;
+        setTcp(position);
+        if (heldBlockIdRef.current) updateBlockPosition(heldBlockIdRef.current, position);
+        appendTrailPoint(position, ratio === 1);
+        if (ratio < 1) {
+          timer.current = window.requestAnimationFrame(animate);
+        } else {
+          log(`${command.kind} ${command.target}${command.targetOffset ? " (Offs)" : ""}${command.wobj ? ` [${command.wobj}]` : ""}`);
+          finishCmd(true);
+        }
       };
       timer.current = window.requestAnimationFrame(animate);
+      return;
     }
   };
   const next = () => {
     if (cancelled.current) return;
     const command = commands.current[pc.current++];
-    if (!command) { setStatus("Completed"); setActiveLine(undefined); log("Program zakonczony."); return; }
+    if (!command) {
+      setStatus("Completed");
+      setActiveLine(undefined); updateProgramPointer(undefined); isStepMode.current = false;
+      updateProgramPointer(undefined);
+      log("Program zakonczony.");
+      return;
+    }
     execute(command);
   };
   const run = () => {
@@ -515,6 +855,7 @@ export function App() {
     clearEditorMarkers();
     clearTimer();
     cancelled.current = false;
+    isStepMode.current = false;
     commands.current = result.commands;
     variablesRef.current = { ...(result.initialVariables ?? {}) };
     pc.current = 0;
@@ -524,6 +865,201 @@ export function App() {
     next();
   };
   const stop = () => { clearTimer(); cancelled.current = true; setStatus("Paused"); log("Wykonanie wstrzymane."); };
+
+  // Resume program execution when the awaited signal condition is met
+  useEffect(() => {
+    if (status !== "Waiting for DI" || !awaiting) return;
+    const inVal = getSignalValue(inputs, awaiting.signal);
+    const outVal = getSignalValue(outputs, awaiting.signal);
+    const currentVal = inVal !== undefined ? inVal : outVal;
+
+    if (currentVal === awaiting.value) {
+      setAwaiting(undefined);
+      setStatus("Running");
+      log(`Otrzymano sygnał ${awaiting.signal} = ${awaiting.value ? 1 : 0}. Wznowienie programu.`);
+      if (isStepMode.current) {
+        setStatus("Paused");
+        isStepMode.current = false;
+      } else {
+        next();
+      }
+    }
+  }, [inputs, outputs, awaiting, status]);
+
+
+  const step = () => {
+    if (status === "Ready" || status === "Completed" || status === "Error" || pc.current === 0) {
+      const result = compile(code, targetPositionsRef.current);
+      if (result.error) {
+        if (result.errorLine) setEditorErrorMarker(result.errorLine, result.error);
+        setStatus("Error");
+        log(`BLAD: ${result.error}`);
+        return;
+      }
+      clearEditorMarkers();
+      clearTimer();
+      cancelled.current = false;
+      commands.current = result.commands;
+      variablesRef.current = { ...(result.initialVariables ?? {}) };
+      pc.current = 0;
+      replaceTrail([tcpRef.current]);
+    }
+    cancelled.current = false;
+    isStepMode.current = true;
+    setStatus("Running");
+    const command = commands.current[pc.current++];
+    if (!command) {
+      setStatus("Completed");
+      setActiveLine(undefined); updateProgramPointer(undefined); isStepMode.current = false;
+      updateProgramPointer(undefined);
+      log("Program zakonczony.");
+      return;
+    }
+    execute(command);
+  };
+
+  const resetPPToMain = () => {
+    clearTimer();
+    cancelled.current = false;
+    const result = compile(code, targetPositionsRef.current);
+    if (!result.error) {
+      commands.current = result.commands;
+      variablesRef.current = { ...(result.initialVariables ?? {}) };
+    }
+    pc.current = 0;
+    if (commands.current.length > 0) {
+      setActiveLine(commands.current[0].line);
+      updateProgramPointer(commands.current[0].line);
+      log(`PP ustawiony na poczatek: linia ${commands.current[0].line}.`);
+    } else {
+      setActiveLine(undefined); updateProgramPointer(undefined); isStepMode.current = false;
+      updateProgramPointer(undefined);
+    }
+    setStatus("Ready");
+  };
+
+  const movePPToCursor = () => {
+    if (!monacoEditorRef.current) return;
+    const pos = monacoEditorRef.current.getPosition();
+    if (!pos) return;
+    const line = pos.lineNumber;
+    if (commands.current.length === 0) {
+      const result = compile(code, targetPositionsRef.current);
+      if (!result.error) {
+        commands.current = result.commands;
+        variablesRef.current = { ...(result.initialVariables ?? {}) };
+      }
+    }
+    const cmdIdx = commands.current.findIndex((c) => c.line >= line);
+    if (cmdIdx !== -1) {
+      pc.current = cmdIdx;
+      setActiveLine(commands.current[cmdIdx].line);
+      updateProgramPointer(commands.current[cmdIdx].line);
+      log(`PP przeniesiony do linii ${commands.current[cmdIdx].line}.`);
+    } else {
+      log(`Brak instrukcji od linii ${line}.`);
+    }
+  };
+
+  const modPos = () => {
+    if (!selectedTarget) {
+      log("Wybierz cel w widoku 3D lub na liscie, aby wykonac ModPos.");
+      return;
+    }
+    pushSceneSnapshot();
+    const newPos: [number, number, number] = [
+      Math.round(tcpRef.current[0]),
+      Math.round(tcpRef.current[1]),
+      Math.round(tcpRef.current[2]),
+    ];
+    targetPositionsRef.current[selectedTarget] = newPos;
+    setTargetPositions({ ...targetPositionsRef.current });
+    log(`[ModPos] Nauczono punkt ${selectedTarget}: [${newPos.join(", ")}] mm.`);
+  };
+
+
+  // Automatic physics: conveyor transport and proximity sensor detection
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      // 1. Conveyor transport of resting workpieces
+      const isConvRunning = Boolean(outputsRef.current["doConvRun"] || outputsRef.current["START_STOP"]);
+      const isConvRight = Boolean(outputsRef.current["doConvDir"] || outputsRef.current["LEWO_PRAWO"]);
+      if (isConvRunning) {
+        setBlocks((prevBlocks) => {
+          let changed = false;
+          const next = prevBlocks.map((b) => {
+            if (heldBlockIdRef.current === b.id) return b;
+            if (isOverConveyor(b.position[0], b.position[1])) {
+              changed = true;
+              const deltaX = (isConvRight ? 1 : -1) * 5.0;
+              let newX = b.position[0] + deltaX;
+              let newZ = b.position[2];
+              if (newX < -370) {
+                newZ = Math.max(conveyorConfig.binZ, newZ - 8);
+              }
+              return { ...b, position: [newX, b.position[1], newZ] as [number, number, number] };
+            }
+            return b;
+          });
+          if (changed) {
+            blocksRef.current = next;
+            return next;
+          }
+          return prevBlocks;
+        });
+      }
+
+      // 2. Sensor proximity detection
+      const curBlocks = blocksRef.current;
+      let b1_b3 = false;
+      let b2_b4 = false;
+      let b5 = false;
+
+      for (const b of curBlocks) {
+        // Infeed optical sensor B1/B3 at X = -60 mm (conveyor) OR Capacitive sensor B1 at pallet slot 4 [170, 310] (task 107)
+        if (
+          (Math.abs(b.position[0] - (-60)) < 26 && Math.abs(b.position[1] - 440) < 45 && b.position[2] < 300) ||
+          (Math.hypot(b.position[0] - 170, b.position[1] - 310) < 35 && b.position[2] < 280)
+        ) {
+          b1_b3 = true;
+        }
+        // Discharge / packaging optical sensor B2/B4 at X = -310 mm
+        if (Math.abs(b.position[0] - (-310)) < 20 && Math.abs(b.position[1] - 440) < 45 && b.position[2] < 300) {
+          b2_b4 = true;
+        }
+        // Inductive sensor B5 [120, 310] - metal detection
+        if (Math.hypot(b.position[0] - 110, b.position[1] - 310) < 60 && b.position[2] < 320) {
+          if (b.material === "metal") b5 = true;
+        }
+      }
+
+      // Check robot TCP over sensor B5 with held workpiece
+      if (Math.hypot(tcpRef.current[0] - 110, tcpRef.current[1] - 310) < 55 && tcpRef.current[2] < 320) {
+        const heldId = heldBlockIdRef.current;
+        const held = curBlocks.find((b) => b.id === heldId);
+        if (held && held.material === "metal") b5 = true;
+      }
+
+      // Auto update active signals
+      setInputs((prev) => {
+        let updated = false;
+        const nextInputs = { ...prev };
+        if ("B1" in nextInputs && nextInputs["B1"] !== b1_b3) { nextInputs["B1"] = b1_b3; updated = true; }
+        if ("B3" in nextInputs && nextInputs["B3"] !== b1_b3) { nextInputs["B3"] = b1_b3; updated = true; }
+        if ("B2" in nextInputs && nextInputs["B2"] !== b2_b4) { nextInputs["B2"] = b2_b4; updated = true; }
+        if ("B4" in nextInputs && nextInputs["B4"] !== b2_b4) { nextInputs["B4"] = b2_b4; updated = true; }
+        if ("B5" in nextInputs && nextInputs["B5"] !== b5) { nextInputs["B5"] = b5; updated = true; }
+        if (updated) {
+          inputsRef.current = nextInputs;
+          return nextInputs;
+        }
+        return prev;
+      });
+    }, 60);
+
+    return () => window.clearInterval(interval);
+  }, []);
+
   const selectExample = (example: typeof examples[number]) => {
     reset();
     undoStackRef.current = [];
@@ -535,16 +1071,33 @@ export function App() {
     setCode(example.code);
   };
   const selectTask = (task: Task) => {
-    reset();
+    reset(task);
     undoStackRef.current = [];
     redoStackRef.current = [];
     updateUndoRedoState();
     clearEditorMarkers();
+    updateProgramPointer(undefined);
+    targetPositionsRef.current = { ...targets };
+    setTargetPositions({ ...targets });
     setSelectedTask(task);
+    setSelected(undefined as any);
     setCode(task.starterCode);
     if (task.tool !== toolRef.current) {
       changeTool(task.tool);
     }
+
+    const { inputs: taskInputs, outputs: taskOutputs } = extractSignalsFromCode(task.starterCode, task);
+    setInputs(taskInputs);
+    inputsRef.current = taskInputs;
+    setOutputs(taskOutputs);
+    outputsRef.current = taskOutputs;
+
+    if (task.blocks) {
+      setBlocks(task.blocks);
+      blocksRef.current = task.blocks;
+    }
+    setShowConveyor(task.showConveyor ?? false);
+    setShowGravityFeeder(task.showGravityFeeder ?? false);
     log(`Wybrano zadanie: ${task.title}. Przeczytaj wskazowki i uzupelnij kod programu.`);
   };
   const visibleTargets = [...new Set([...targetNamesInCode(code, targetPositions), ...customTargets])];
@@ -884,8 +1437,77 @@ export function App() {
     window.addEventListener("pointerup", onUp);
   };
 
-  return <main style={{ gridTemplateRows: `52px minmax(0, 1fr) 6px ${bottomHeight}px` }}>
-    <header><div className="brand"><span className="brand-dot">R</span><strong>RAPID Sim</strong><span className="robot-label">ABB IRB 1090 <i>·</i> OmniCore learning simulator</span></div><div className="controls"><div className="history-controls" aria-label="Historia zmian"><button onClick={undo} disabled={!canUndo} title="Cofnij (Cmd+Z / Ctrl+Z)">↺ Undo</button><button onClick={redo} disabled={!canRedo} title="Ponow (Cmd+Shift+Z / Ctrl+Y)">↻ Redo</button></div><div className="tool-switch" aria-label="Wybierz narzedzie"><button className={tool === "pen" ? "active" : ""} onClick={() => changeTool("pen")}>Pen</button><button className={tool === "gripper" ? "active" : ""} onClick={() => changeTool("gripper")}>Gripper</button></div><Status status={status} /><button className="primary" onClick={run}>Run</button><button onClick={stop}>Pause</button><button onClick={reset}>Reset</button></div></header>
+  return <main style={{ gridTemplateRows: viewMode === "quiz" ? "52px 1fr" : `52px minmax(0, 1fr) 6px ${bottomHeight}px` }}>
+    <header>
+      <div className="brand">
+        <span className="brand-dot">R</span>
+        <strong>RAPID Sim</strong>
+        <span className="robot-label">ABB IRB 1090 <i>·</i> OmniCore / FlexPendant</span>
+        <div className="brand-nav-group">
+          <button
+            type="button"
+            className={`brand-nav-btn ${viewMode === "simulator" ? "active" : ""}`}
+            onClick={() => setViewMode("simulator")}
+            title="Przejdź do Symulatora robota ABB"
+          >
+            🤖 Symulator
+          </button>
+          <button
+            type="button"
+            className={`brand-nav-btn quiz-btn ${viewMode === "quiz" ? "active" : ""}`}
+            onClick={() => setViewMode("quiz")}
+            title="Baza pytań testowych do egzaminu CKE ELM.08"
+          >
+            🎓 QUIZ ELM.08
+          </button>
+        </div>
+      </div>
+      {viewMode === "simulator" ? (
+        <div className="controls">
+          <div className="history-controls" aria-label="Historia zmian">
+            <button onClick={undo} disabled={!canUndo} title="Cofnij (Cmd+Z / Ctrl+Z)">↺ Undo</button>
+            <button onClick={redo} disabled={!canRedo} title="Ponow (Cmd+Shift+Z / Ctrl+Y)">↻ Redo</button>
+          </div>
+          <div className="speed-override-control" title="ABB Speed Override (Ograniczenie prędkości)">
+            <span>Prędkość:</span>
+            <input
+              type="range"
+              min={10}
+              max={100}
+              step={10}
+              value={speedOverride}
+              onChange={(e) => setSpeedOverride(Number(e.target.value))}
+            />
+            <b>{speedOverride}%</b>
+            <div className="speed-quick-buttons">
+              <button className={speedOverride === 10 ? "active" : ""} onClick={() => setSpeedOverride(10)}>10%</button>
+              <button className={speedOverride === 20 ? "active" : ""} onClick={() => setSpeedOverride(20)}>20%</button>
+              <button className={speedOverride === 50 ? "active" : ""} onClick={() => setSpeedOverride(50)}>50%</button>
+              <button className={speedOverride === 100 ? "active" : ""} onClick={() => setSpeedOverride(100)}>100%</button>
+            </div>
+          </div>
+          <div className="tool-switch" aria-label="Wybierz narzędzie">
+            <button className={tool === "pen" ? "active" : ""} onClick={() => changeTool("pen")}>Pen</button>
+            <button className={tool === "gripper" ? "active" : ""} onClick={() => changeTool("gripper")}>Gripper</button>
+          </div>
+          <Status status={status} />
+          <button className="primary" onClick={run} title="Uruchom program">Run</button>
+          <button onClick={step} title="Krok po kroku">Krok</button>
+          <button onClick={stop} title="Wstrzymaj wykonanie">Pause</button>
+          <button onClick={() => reset()} title="Resetuj stan symulatora">Reset</button>
+        </div>
+      ) : (
+        <div className="controls">
+          <button className="primary" onClick={() => setViewMode("simulator")} title="Powrót do wirtualnego stanowiska 3D">
+            🤖 Wróć do Symulatora
+          </button>
+        </div>
+      )}
+    </header>
+    {viewMode === "quiz" ? (
+      <QuizView onBackToSimulator={() => setViewMode("simulator")} />
+    ) : (
+      <>
     <section className="workspace" style={{ gridTemplateColumns: `${lessonsOpen ? `${sidebarWidth}px 6px` : "38px 0px"} minmax(300px, 1fr) 6px ${simulationWidth}px` }}>
       <aside className={`lessons ${lessonsOpen ? "" : "collapsed"}`}>
         <button className="lesson-collapse" onClick={() => setLessonsOpen((open) => !open)} aria-label={lessonsOpen ? "Zwin panel" : "Rozwin panel"}>{lessonsOpen ? "‹" : "›"}</button>
@@ -917,17 +1539,50 @@ export function App() {
           </div>
 
           {sidebarTab === "lessons" && <>
-            <div className="panel-title">LEKCJE <span>{examples.length}</span></div>
+            <div className="panel-title">LEKCJE RAPID <span>{examples.length}</span></div>
             {examples.map((example) => (
-              <button
+              <div
                 className={`lesson ${!selectedTask && selected.id === example.id ? "selected" : ""}`}
                 key={example.id}
                 onClick={() => selectExample(example)}
+                style={{ cursor: "pointer" }}
               >
                 <small>{example.topic}</small>
                 <b>{example.title}</b>
-              </button>
+                <div className="task-actions-row">
+                  <button
+                    type="button"
+                    className="task-view-content-btn lecture-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setViewingLecture(example);
+                    }}
+                    title="Otwórz wykład i teorię do tej lekcji"
+                  >
+                    📖 Wykład
+                  </button>
+                </div>
+              </div>
             ))}
+
+            {!selectedTask && selected && (
+              <div className="task-info-card">
+                <div className="task-info-head">
+                  <b>{selected.title}</b>
+                  <span className="task-badge podstawowe">{selected.topic}</span>
+                </div>
+                <p className="task-info-desc">{selected.summary}</p>
+                <button
+                  type="button"
+                  className="task-card-content-btn lecture-card-btn"
+                  onClick={() => setViewingLecture(selected)}
+                  title="Obejrzyj pełny wykład i zasady działania instrukcji"
+                >
+                  📖 Otwórz wykład teoretyczny
+                </button>
+              </div>
+            )}
+
             {savedProjects.length > 0 && <>
               <div className="panel-title saved-title">ZAPISANE</div>
               {savedProjects.map((project) => (
@@ -940,9 +1595,9 @@ export function App() {
           </>}
 
           {sidebarTab === "tasks" && <>
-            <div className="panel-title">ZADANIA TRENINGOWE <span>5</span></div>
+            <div className="panel-title">ZADANIA TRENINGOWE <span>{tasks.filter((t) => t.category === "podstawowe").length}</span></div>
             {tasks.filter((t) => t.category === "podstawowe").map((task) => (
-              <button
+              <div
                 className={`lesson task-item ${selectedTask?.id === task.id ? "selected" : ""}`}
                 key={task.id}
                 onClick={() => selectTask(task)}
@@ -952,12 +1607,25 @@ export function App() {
                   <small>{task.topic}</small>
                 </div>
                 <b>{task.title}</b>
-              </button>
+                <div className="task-actions-row">
+                  <button
+                    type="button"
+                    className="task-view-content-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setViewingTask(task);
+                    }}
+                    title="Obejrzyj pełną treść zadania"
+                  >
+                    📋 Treść zadania
+                  </button>
+                </div>
+              </div>
             ))}
 
-            <div className="panel-title exam-title">EGZAMIN ELM.08 <span>5</span></div>
+            <div className="panel-title exam-title">EGZAMIN ELM.08 <span>{tasks.filter((t) => t.category === "elm08").length}</span></div>
             {tasks.filter((t) => t.category === "elm08").map((task) => (
-              <button
+              <div
                 className={`lesson task-item elm08 ${selectedTask?.id === task.id ? "selected" : ""}`}
                 key={task.id}
                 onClick={() => selectTask(task)}
@@ -967,7 +1635,20 @@ export function App() {
                   <small>{task.topic}</small>
                 </div>
                 <b>{task.title}</b>
-              </button>
+                <div className="task-actions-row">
+                  <button
+                    type="button"
+                    className="task-view-content-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setViewingTask(task);
+                    }}
+                    title="Obejrzyj pełną treść zadania (arkusz CKE)"
+                  >
+                    📋 Treść zadania
+                  </button>
+                </div>
+              </div>
             ))}
 
             {selectedTask && (
@@ -977,6 +1658,14 @@ export function App() {
                   <span className={`task-badge ${selectedTask.category}`}>{selectedTask.category === "elm08" ? "ELM.08" : "Podstawowe"}</span>
                 </div>
                 <p className="task-info-desc">{selectedTask.summary}</p>
+                <button
+                  type="button"
+                  className="task-card-content-btn"
+                  onClick={() => setViewingTask(selectedTask)}
+                  title="Obejrzyj sformatowaną treść i wytyczne arkusza CKE"
+                >
+                  📋 Otwórz pełną treść zadania
+                </button>
                 <div className="task-tips-box">
                   <strong>Wskazówki dla ucznia:</strong>
                   <ul>
@@ -1004,7 +1693,52 @@ export function App() {
           aria-orientation="vertical"
         />
       )}
-      <section className="editor-panel" ref={editorPanelRef}><div className="panel-head"><div><span className="file-dot" /> MainModule.mod</div><span>RAPID</span></div><Editor height="100%" value={code} onChange={handleCodeChange} onMount={editorMount} theme="vs-dark" options={{ automaticLayout: true, fontSize: 14, minimap: { enabled: false }, lineNumbers: "on", scrollBeyondLastLine: false, padding: { top: 14 }, fontFamily: "SFMono-Regular, Consolas, monospace" }} /></section>
+      <section className="editor-panel" ref={editorPanelRef}>
+        <div className="panel-head">
+          <div><span className="file-dot" /> MainModule.mod</div>
+          <div className="editor-actions">
+            {selectedTask ? (
+              <button
+                type="button"
+                className="editor-task-btn"
+                onClick={() => setViewingTask(selectedTask)}
+                title="Zobacz pełną treść bieżącego zadania"
+              >
+                📋 Treść zadania
+              </button>
+            ) : selected && (
+              <button
+                type="button"
+                className="editor-task-btn lecture-btn"
+                onClick={() => setViewingLecture(selected)}
+                title="Zobacz wykład i teorię do tej lekcji"
+              >
+                📖 Wykład teoretyczny
+              </button>
+            )}
+            <button onClick={resetPPToMain} title="Ustaw wskaźnik programu (PP) na początek">PP do Main</button>
+            <button onClick={movePPToCursor} title="Ustaw wskaźnik programu (PP) na linię kursora">PP do kursora</button>
+            <span>RAPID</span>
+          </div>
+        </div>
+        <Editor
+          height="100%"
+          value={code}
+          onChange={handleCodeChange}
+          onMount={editorMount}
+          theme="vs-dark"
+          options={{
+            automaticLayout: true,
+            fontSize: 14,
+            minimap: { enabled: false },
+            lineNumbers: "on",
+            glyphMargin: true,
+            scrollBeyondLastLine: false,
+            padding: { top: 14 },
+            fontFamily: "SFMono-Regular, Consolas, monospace",
+          }}
+        />
+      </section>
       <div className="resize-handle" onPointerDown={startResize} role="separator" aria-label="Zmien szerokosc widoku symulacji" aria-orientation="vertical" />
         <section className="sim-panel">
           <div className="panel-head">
@@ -1058,6 +1792,27 @@ export function App() {
               >
                 {showTable ? "Table ON" : "Table OFF"}
               </button>
+              <button
+                className={showConveyor ? "active" : ""}
+                onClick={() => setShowConveyor((v) => !v)}
+                title="Włącz/wyłącz przenośnik taśmowy"
+              >
+                {showConveyor ? "Taśma ON" : "Taśma OFF"}
+              </button>
+              <button
+                className={showGravityFeeder ? "active" : ""}
+                onClick={() => setShowGravityFeeder((v) => !v)}
+                title="Włącz/wyłącz magazyn opadowy detali"
+              >
+                {showGravityFeeder ? "Podajnik ON" : "Podajnik OFF"}
+              </button>
+              <button
+                className={selectedTarget ? "action-btn" : ""}
+                onClick={modPos}
+                title="Zapisz aktualną pozycję TCP do zaznaczonego celu (ModPos)"
+              >
+                ModPos
+              </button>
               {tool === "gripper" && (
                 <div className="block-stepper" title="Liczba blokow">
                   <span>Blocks:</span>
@@ -1077,6 +1832,14 @@ export function App() {
           </div>
           <div className="canvas">
             <RobotScene
+              showConveyor={showConveyor}
+              showGravityFeeder={showGravityFeeder}
+              showSorterBins={Boolean(selectedTask?.showSorterBins ?? (selectedTask?.id === "task-elm08-101" || selected?.id === "conditions"))}
+              showMountingPins={Boolean(selectedTask?.showMountingPins ?? (selectedTask?.id === "task-elm08-107" || selected?.id === "procedures"))}
+              conveyorRunning={Boolean(outputs["doConvRun"] || outputs["START_STOP"])}
+              conveyorDir={Boolean(outputs["doConvDir"] || outputs["LEWO_PRAWO"])}
+              sensorsActive={inputs}
+              activeWObj={code.includes("wobj2") ? "wobj2" : "wobj1"}
               tcp={tcp}
               tcpPitch={tcpPitch}
               target={target}
@@ -1196,7 +1959,48 @@ export function App() {
         </section>
     </section>
     <div className="bottom-resize-handle" onPointerDown={startBottomResize} role="separator" aria-label="Zmien wysokosc konsoli i sygnalow" aria-orientation="horizontal" />
-    <section className="bottom"><div className="console"><div className="tabs"><b>CONSOLE</b><span>DEBUGGER</span></div><div className="terminal">{consoleLines.map((line, index) => <div key={`${line}-${index}`} className={line.includes("BLAD") ? "error-text" : ""}>{line}</div>)}</div></div><div className="signals"><div className="tabs"><b>SIGNALS</b><span>{awaiting ? `WAITING: ${awaiting.signal}` : "I/O BOARD"}</span></div><div className="signal-groups"><SignalGroup title="DIGITAL INPUTS" signals={inputs} waiting={awaiting?.signal} onToggle={(name) => setInputs((values) => ({ ...values, [name]: !values[name] }))} /><SignalGroup title="DIGITAL OUTPUTS" signals={outputs} enabledSignals={["doGripper"]} onToggle={() => setGripperOutput(!outputs.doGripper)} /></div></div>
+    <section className="bottom"><div className="console"><div className="tabs"><b>CONSOLE</b><span>DEBUGGER</span></div><div className="terminal">{consoleLines.map((line, index) => <div key={`${line}-${index}`} className={line.includes("BLAD") ? "error-text" : ""}>{line}</div>)}</div></div><div className="signals"><div className="tabs"><b>SIGNALS</b><span>{awaiting ? `WAITING: ${awaiting.signal}` : "I/O BOARD"}</span></div><div className="signal-groups">
+        <SignalGroup
+          title="CYFROWE WEJŚCIA (DI)"
+          signals={inputs}
+          waiting={awaiting?.signal}
+          onToggle={(name) => {
+            setInputs((values) => {
+              const newVal = !values[name];
+              const updated = { ...values, [name]: newVal };
+              inputsRef.current = updated;
+
+              // If user manually clears B4 or B2 (simulating operator taking workpiece from packaging station)
+              if ((name === "B4" || name === "B2") && !newVal) {
+                setBlocks((prev) => {
+                  const next = prev.filter(
+                    (b) => !(Math.abs(b.position[0] - (-310)) < 40 && Math.abs(b.position[1] - 440) < 50)
+                  );
+                  blocksRef.current = next;
+                  return next;
+                });
+              }
+
+              return updated;
+            });
+          }}
+        />
+        <SignalGroup
+          title="CYFROWE WYJŚCIA (DO)"
+          signals={outputs}
+          onToggle={(name) => {
+            if (name === "doGripper") {
+              setGripperOutput(!outputs.doGripper);
+            } else {
+              setOutputs((values) => {
+                const updated = { ...values, [name]: !values[name] };
+                outputsRef.current = updated;
+                return updated;
+              });
+            }
+          }}
+        />
+      </div></div>
     {contextMenu && (
       <div
         className="context-menu"
@@ -1238,7 +2042,66 @@ export function App() {
     )}
     {newTargetPoint && <div className="target-dialog-backdrop" onMouseDown={() => setNewTargetPoint(undefined)}><div className="target-dialog" role="dialog" aria-modal="true" aria-label="Dodaj punkt" onMouseDown={(event) => event.stopPropagation()}><b>Add point at TCP</b><small>[{newTargetPoint.map((value) => Math.round(value)).join(", ")}] mm</small><label>Name<input autoFocus value={targetName} onChange={(event) => setTargetName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") createTarget(); if (event.key === "Escape") setNewTargetPoint(undefined); }} placeholder="pCustom" /></label><div><button onClick={() => setNewTargetPoint(undefined)}>Cancel</button><button className="confirm" onClick={createTarget}>Add point</button></div></div></div>}
     </section>
+    </>)}
+      {viewingTask && (
+      <TaskDetailsModal
+        task={viewingTask}
+        onClose={() => setViewingTask(undefined)}
+        onLoadTask={(taskToLoad: Task) => {
+          selectTask(taskToLoad);
+          setViewingTask(undefined);
+        }}
+        isSelected={selectedTask?.id === viewingTask.id}
+      />
+    )}
+    {viewingLecture && (
+      <LessonLectureModal
+        example={viewingLecture}
+        onClose={() => setViewingLecture(undefined)}
+        onLoadExample={(ex) => {
+          selectExample(ex);
+          setViewingLecture(undefined);
+        }}
+        isSelected={!selectedTask && selected.id === viewingLecture.id}
+      />
+    )}
   </main>;
 }
 
-function SignalGroup({ title, signals, waiting, onToggle, enabledSignals }: { title: string; signals: SignalMap; waiting?: string; onToggle?: (name: string) => void; enabledSignals?: string[] }) { return <div className="signal-group"><small>{title}</small>{Object.entries(signals).map(([name, value]) => <button disabled={!onToggle || (enabledSignals !== undefined && !enabledSignals.includes(name))} onClick={() => onToggle?.(name)} className={`signal ${value ? "on" : ""} ${waiting === name ? "waiting" : ""}`} key={name}><span className="led" />{name}<b>{value ? "1" : "0"}</b></button>)}</div>; }
+function SignalGroup({
+  title,
+  signals,
+  waiting,
+  onToggle,
+}: {
+  title: string;
+  signals: SignalMap;
+  waiting?: string;
+  onToggle?: (name: string) => void;
+}) {
+  return (
+    <div className="signal-group">
+      <small>{title}</small>
+      {Object.entries(signals).map(([name, value]) => {
+        const isWaiting = Boolean(waiting && waiting.toLowerCase() === name.toLowerCase());
+        return (
+          <button
+            key={name}
+            disabled={!onToggle}
+            onClick={() => onToggle?.(name)}
+            className={`signal ${value ? "on" : ""} ${isWaiting ? "waiting" : ""}`}
+            title={
+              isWaiting
+                ? `Oczekiwanie na ${name} = 1. Kliknij, aby aktywować sygnał!`
+                : `Kliknij, aby przełączyć stan sygnału ${name} (${value ? "1 -> 0" : "0 -> 1"})`
+            }
+          >
+            <span className="led" />
+            <span>{name}</span>
+            <b>{value ? "1" : "0"}</b>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
