@@ -119,6 +119,14 @@ for (let idx = 0; idx < elmTasks.length; idx++) {
         outputs,
       });
       variables[cmd.variable.toLowerCase()] = val;
+      if (task.id === "task-elm08-113") {
+        if (variables["nsuma"] >= 4) {
+          inputs["di_MagazynDetale"] = false;
+        }
+        if ("nsuma" in variables) {
+          inputs["di_Kierunek"] = (variables["nsuma"] % 2 === 0);
+        }
+      }
       pc++;
       continue;
     }
@@ -127,6 +135,14 @@ for (let idx = 0; idx < elmTasks.length; idx++) {
       const step = cmd.stepExpr ? evaluateExpression(cmd.stepExpr, { variables, targetLibrary: targets, inputs, outputs }) : 1;
       const k = cmd.variable.toLowerCase();
       variables[k] = (variables[k] || 0) + (Number(step) || 1);
+      if (task.id === "task-elm08-113") {
+        if (variables["nsuma"] >= 4) {
+          inputs["di_MagazynDetale"] = false;
+        }
+        if ("nsuma" in variables) {
+          inputs["di_Kierunek"] = (variables["nsuma"] % 2 === 0);
+        }
+      }
       pc++;
       continue;
     }
@@ -180,12 +196,13 @@ for (let idx = 0; idx < elmTasks.length; idx++) {
 
     if (cmd.type === "move") {
       movesCount++;
-      const baseDest = targets[cmd.target] || defaultTcp;
+      const baseDest = cmd.target === "CRobT" ? tcp : (targets[cmd.target] || defaultTcp);
       let dest = [...baseDest];
       if (cmd.targetOffsetExpr) {
         const dx = Number(evaluateExpression(cmd.targetOffsetExpr[0], { variables, targetLibrary: targets, inputs, outputs })) || 0;
         const dy = Number(evaluateExpression(cmd.targetOffsetExpr[1], { variables, targetLibrary: targets, inputs, outputs })) || 0;
-        const dz = Number(evaluateExpression(cmd.targetOffsetExpr[2], { variables, targetLibrary: targets, inputs, outputs })) || 0;
+        let dz = Number(evaluateExpression(cmd.targetOffsetExpr[2], { variables, targetLibrary: targets, inputs, outputs })) || 0;
+        if (cmd.isRelTool && dz < 0) dz = -dz;
         dest = [dest[0] + dx, dest[1] + dy, dest[2] + dz];
       } else if (cmd.targetOffset) {
         dest = [dest[0] + cmd.targetOffset[0], dest[1] + cmd.targetOffset[1], dest[2] + cmd.targetOffset[2]];
@@ -243,5 +260,5 @@ console.log("===================================================================
 if (failedTests > 0) {
   process.exit(1);
 } else {
-  console.log("\n🌟 WSZYSTKIE 12 ZADAŃ EGZAMINACYJNYCH ELM.08 PRZESZŁO TESTY Z SUKCESEM 100%!");
+  console.log("\n🌟 WSZYSTKIE 13 ZADAŃ EGZAMINACYJNYCH ELM.08 PRZESZŁO TESTY Z SUKCESEM 100%!");
 }

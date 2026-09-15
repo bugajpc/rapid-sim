@@ -47,6 +47,10 @@ type Props = {
   showGravityFeeder?: boolean;
   showSorterBins?: boolean;
   showMountingPins?: boolean;
+  showLinearPallet?: boolean;
+  showControlDesk?: boolean;
+  outputs?: Record<string, boolean>;
+  onToggleInput?: (name: string) => void;
 };
 
 function Robot({
@@ -130,14 +134,20 @@ function Robot({
 
   useFrame(({ camera }) => {
     if (!model.current) return;
-    const isOccluding = fadeWhileRunning && inspectPoints.some(([pointX, pointY, pointZ]) => {
-      target.current.set(pointX / 1000, pointZ / 1000, -pointY / 1000);
-      rayDirection.current.subVectors(target.current, camera.position);
-      const distanceToPoint = rayDirection.current.length();
-      raycaster.current.set(camera.position, rayDirection.current.normalize());
-      const hit = raycaster.current.intersectObject(model.current!, true)[0];
-      return hit !== undefined && hit.distance < distanceToPoint - 0.015;
-    });
+    const isOccluding = Boolean(
+      fadeWhileRunning &&
+      inspectPoints.some((pt) => {
+        if (!pt || !Array.isArray(pt) || pt.length < 3) return false;
+        const [pointX, pointY, pointZ] = pt;
+        if (typeof pointX !== "number" || typeof pointY !== "number" || typeof pointZ !== "number") return false;
+        target.current.set(pointX / 1000, pointZ / 1000, -pointY / 1000);
+        rayDirection.current.subVectors(target.current, camera.position);
+        const distanceToPoint = rayDirection.current.length();
+        raycaster.current.set(camera.position, rayDirection.current.normalize());
+        const hit = raycaster.current.intersectObject(model.current!, true)[0];
+        return hit !== undefined && hit.distance < distanceToPoint - 0.015;
+      })
+    );
     if (isOccluding === faded.current) return;
     faded.current = isOccluding;
     model.current.traverse((child) => {
@@ -544,7 +554,7 @@ function Marker({
   onContextMenu,
 }: {
   name: string;
-  position: [number, number, number];
+  position?: [number, number, number];
   active: boolean;
   editable: boolean;
   onSelect: () => void;
@@ -553,6 +563,9 @@ function Marker({
   onContextMenu: (screenPosition: { x: number; y: number }) => void;
 }) {
   const [markerObject, setMarkerObject] = useState<Group>();
+  if (!position || !Array.isArray(position) || position.length < 3) {
+    return null;
+  }
   const [x, y, z] = position.map((value) => value / 1000);
   return (
     <>
@@ -988,7 +1001,7 @@ function ConveyorBelt({
         {/* Optical Lens */}
         <mesh position={[0, 0, 0.012]} rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[0.005, 0.005, 0.003, 16]} />
-          <meshBasicMaterial color={sensorsActive["B1"] || sensorsActive["B3"] ? "#f59e0b" : "#3b82f6"} />
+          <meshBasicMaterial color={sensorsActive["B1"] || sensorsActive["B3"] || sensorsActive["di_CzujnikPrawy"] || sensorsActive["B_PRAWY"] ? "#f59e0b" : "#3b82f6"} />
         </mesh>
         {/* Power LED (Green) */}
         <mesh position={[-0.004, 0.014, -0.007]}>
@@ -998,11 +1011,11 @@ function ConveyorBelt({
         {/* Signal Active LED (Amber) */}
         <mesh position={[0.004, 0.014, -0.007]}>
           <sphereGeometry args={[0.0022, 10, 10]} />
-          <meshBasicMaterial color={sensorsActive["B1"] || sensorsActive["B3"] ? "#eab308" : "#475569"} />
+          <meshBasicMaterial color={sensorsActive["B1"] || sensorsActive["B3"] || sensorsActive["di_CzujnikPrawy"] || sensorsActive["B_PRAWY"] ? "#eab308" : "#475569"} />
         </mesh>
         <Billboard position={[0, 0.038, 0]}>
-          <Text fontSize={0.019} color={sensorsActive["B1"] || sensorsActive["B3"] ? "#fbbf24" : "#94a3b8"} anchorX="center" anchorY="bottom">
-            B1 / B3
+          <Text fontSize={0.019} color={sensorsActive["B1"] || sensorsActive["B3"] || sensorsActive["di_CzujnikPrawy"] || sensorsActive["B_PRAWY"] ? "#fbbf24" : "#94a3b8"} anchorX="center" anchorY="bottom">
+            {"di_CzujnikPrawy" in sensorsActive ? "B_PRAWY (B3)" : "B1 / B3"}
           </Text>
         </Billboard>
         {/* Retroreflector on opposite side of conveyor */}
@@ -1011,7 +1024,7 @@ function ConveyorBelt({
           <meshStandardMaterial color="#f97316" roughness={0.3} metalness={0.2} />
         </mesh>
         {/* Optical Sensor Beam across conveyor */}
-        {!(sensorsActive["B1"] || sensorsActive["B3"]) && (
+        {!(sensorsActive["B1"] || sensorsActive["B3"] || sensorsActive["di_CzujnikPrawy"] || sensorsActive["B_PRAWY"]) && (
           <Line
             points={[
               [0, 0, 0.014],
@@ -1037,7 +1050,7 @@ function ConveyorBelt({
         </mesh>
         <mesh position={[0, 0, 0.012]} rotation={[Math.PI / 2, 0, 0]}>
           <cylinderGeometry args={[0.005, 0.005, 0.003, 16]} />
-          <meshBasicMaterial color={sensorsActive["B2"] || sensorsActive["B4"] ? "#f59e0b" : "#3b82f6"} />
+          <meshBasicMaterial color={sensorsActive["B2"] || sensorsActive["B4"] || sensorsActive["di_CzujnikLewy"] || sensorsActive["B_LEWY"] ? "#f59e0b" : "#3b82f6"} />
         </mesh>
         <mesh position={[-0.004, 0.014, -0.007]}>
           <sphereGeometry args={[0.002, 10, 10]} />
@@ -1045,11 +1058,11 @@ function ConveyorBelt({
         </mesh>
         <mesh position={[0.004, 0.014, -0.007]}>
           <sphereGeometry args={[0.0022, 10, 10]} />
-          <meshBasicMaterial color={sensorsActive["B2"] || sensorsActive["B4"] ? "#eab308" : "#475569"} />
+          <meshBasicMaterial color={sensorsActive["B2"] || sensorsActive["B4"] || sensorsActive["di_CzujnikLewy"] || sensorsActive["B_LEWY"] ? "#eab308" : "#475569"} />
         </mesh>
         <Billboard position={[0, 0.038, 0]}>
-          <Text fontSize={0.019} color={sensorsActive["B2"] || sensorsActive["B4"] ? "#fbbf24" : "#94a3b8"} anchorX="center" anchorY="bottom">
-            B2 / B4
+          <Text fontSize={0.019} color={sensorsActive["B2"] || sensorsActive["B4"] || sensorsActive["di_CzujnikLewy"] || sensorsActive["B_LEWY"] ? "#fbbf24" : "#94a3b8"} anchorX="center" anchorY="bottom">
+            {"di_CzujnikLewy" in sensorsActive ? "B_LEWY (B1/B4)" : "B2 / B4"}
           </Text>
         </Billboard>
         {/* Retroreflector on opposite side of conveyor */}
@@ -1138,7 +1151,7 @@ function ConveyorBelt({
 }
 
 function InductiveSensorB5({ active }: { active?: boolean }) {
-  const [sx, sy, sz] = targets.pSensorB5;
+  const [sx, sy, sz] = targets?.pSensorB5 ?? [110, 310, 270];
   const worldX = sx / 1000;
   const worldY = (sz - 25) / 1000;
   const worldZ = -sy / 1000;
@@ -1262,92 +1275,266 @@ function DrawingPaperSheet({ activeWObj }: { activeWObj?: string }) {
   );
 }
 
-function GravityFeeder() {
-  const [fx, fy] = targets.pFeederPick;
-  const worldX = fx / 1000;
-  const worldY = 0.2005; // Resting flush on table top (Z=200 mm)
-  const worldZ = -fy / 1000;
-  const size = 0.07; // Compact 70mm x 70mm zone
+function GravityFeeder({ bMagActive = false }: { bMagActive?: boolean }) {
+  const pPick = targets.pMag_Pick ?? targets.pMag ?? [180, 440, 255];
+  const worldX = pPick[0] / 1000;
+  const worldY = 0.2005; // Table top surface
+  const worldZ = -pPick[1] / 1000;
+  const size = 0.048; // 48 mm square profile
 
   return (
     <group position={[worldX, worldY, worldZ]}>
-      {/* 1. Flat semi-transparent pickup zone on table surface */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
-        <planeGeometry args={[size, size]} />
-        <meshStandardMaterial
-          color="#38bdf8"
-          roughness={0.9}
-          metalness={0.1}
-          transparent
-          opacity={0.22}
-          depthWrite={false}
-        />
+      {/* Base mounting flange */}
+      <mesh position={[0, 0.002, 0]} receiveShadow>
+        <boxGeometry args={[size + 0.024, 0.004, size + 0.024]} />
+        <meshStandardMaterial color="#334155" metalness={0.7} roughness={0.3} />
       </mesh>
 
-      {/* 2. Delicate perimeter border lines */}
-      <Line
-        points={[
-          [-size / 2, 0.0005, -size / 2],
-          [size / 2, 0.0005, -size / 2],
-          [size / 2, 0.0005, size / 2],
-          [-size / 2, 0.0005, size / 2],
-          [-size / 2, 0.0005, -size / 2],
-        ]}
-        color="#38bdf8"
-        lineWidth={1.2}
-        transparent
-        opacity={0.6}
-      />
-
-      {/* 3. Subtle corner registration marks */}
+      {/* Vertical magazine guide pillars (Gravity Chute) */}
       {[
-        [-size / 2, -size / 2],
-        [size / 2, -size / 2],
-        [size / 2, size / 2],
-        [-size / 2, size / 2],
-      ].map(([cx, cz], i) => (
-        <mesh key={i} position={[cx, 0.0008, cz]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.003, 0.005, 12]} />
-          <meshBasicMaterial color="#7dd3fc" transparent opacity={0.7} />
+        [-size / 2 + 0.005, -size / 2 + 0.005],
+        [size / 2 - 0.005, -size / 2 + 0.005],
+        [-size / 2 + 0.005, size / 2 - 0.005],
+        [size / 2 - 0.005, size / 2 - 0.005],
+      ].map(([px, pz], i) => (
+        <mesh key={`col-${i}`} position={[px, 0.1, pz]}>
+          <cylinderGeometry args={[0.0025, 0.0025, 0.2, 12]} />
+          <meshStandardMaterial color="#94a3b8" metalness={0.8} roughness={0.2} />
         </mesh>
       ))}
 
-      {/* 4. Center crosshair */}
-      <Line
-        points={[
-          [-0.012, 0.0005, 0],
-          [0.012, 0.0005, 0],
-        ]}
-        color="#7dd3fc"
-        lineWidth={1}
-        transparent
-        opacity={0.5}
-      />
-      <Line
-        points={[
-          [0, 0.0005, -0.012],
-          [0, 0.0005, 0.012],
-        ]}
-        color="#7dd3fc"
-        lineWidth={1}
-        transparent
-        opacity={0.5}
-      />
+      {/* Top collar bracket */}
+      <mesh position={[0, 0.2, 0]}>
+        <boxGeometry args={[size + 0.01, 0.006, size + 0.01]} />
+        <meshStandardMaterial color="#334155" metalness={0.7} roughness={0.3} />
+      </mesh>
+
+      {/* Optical magazine sensor B_MAG */}
+      <group position={[size / 2 + 0.012, 0.025, 0]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.018, 0.024, 0.016]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.6} roughness={0.3} />
+        </mesh>
+        <mesh position={[-0.009, 0, 0]} rotation={[0, 0, Math.PI / 2]}>
+          <cylinderGeometry args={[0.0035, 0.0035, 0.004, 12]} />
+          <meshBasicMaterial color={bMagActive ? "#f59e0b" : "#3b82f6"} />
+        </mesh>
+        <mesh position={[0, 0.012, 0]}>
+          <sphereGeometry args={[0.002, 10, 10]} />
+          <meshBasicMaterial color={bMagActive ? "#eab308" : "#475569"} />
+        </mesh>
+        <Billboard position={[0, 0.026, 0]}>
+          <Text fontSize={0.012} color={bMagActive ? "#f59e0b" : "#94a3b8"} anchorX="center" anchorY="bottom">
+            B_MAG (B5)
+          </Text>
+        </Billboard>
+      </group>
 
       {/* 5. Clean, low-profile label */}
-      <Billboard position={[0, 0.022, 0]}>
+      <Billboard position={[0, 0.215, 0]}>
         <Text fontSize={0.014} color="#7dd3fc" anchorX="center" anchorY="bottom">
-          Magazyn detali
+          Magazyn opadowy
         </Text>
       </Billboard>
     </group>
   );
 }
 
+function LinearPallet({ targets: targetLib = targets }: { targets?: Record<string, [number, number, number]> } = {}) {
+  const [bx, by] = targetLib?.pPaleta_Baza ?? targets?.pPaleta_Baza ?? [-70, 310, 245];
+  const worldX = bx / 1000;
+  const worldY = 0.2005; // Table top surface
+  const worldZ = -by / 1000;
+  const pitch = 0.035; // 35 mm pitch
+  const slotCount = 5;
+  const plateLength = (slotCount - 1) * pitch + 0.06; // ~200 mm
+  const plateWidth = 0.065; // 65 mm
+
+  return (
+    <group position={[worldX + ((slotCount - 1) * pitch) / 2, worldY, worldZ]}>
+      {/* Aluminum Pallet Base Plate */}
+      <mesh position={[0, 0.0015, 0]} receiveShadow>
+        <boxGeometry args={[plateLength, 0.003, plateWidth]} />
+        <meshStandardMaterial color="#475569" metalness={0.7} roughness={0.3} />
+      </mesh>
+
+      {/* Border rim */}
+      <mesh position={[0, 0.0031, 0]}>
+        <boxGeometry args={[plateLength - 0.002, 0.0002, plateWidth - 0.002]} />
+        <meshBasicMaterial color="#38bdf8" wireframe />
+      </mesh>
+
+      {/* 5 Slot Positions */}
+      {Array.from({ length: slotCount }).map((_, i) => {
+        const slotRelX = -((slotCount - 1) * pitch) / 2 + i * pitch;
+        return (
+          <group key={i} position={[slotRelX, 0.0032, 0]}>
+            {/* Slot circular nest target ring */}
+            <mesh rotation={[-Math.PI / 2, 0, 0]}>
+              <ringGeometry args={[0.014, 0.016, 24]} />
+              <meshBasicMaterial color="#38bdf8" transparent opacity={0.8} />
+            </mesh>
+            <mesh rotation={[-Math.PI / 2, 0, 0]}>
+              <circleGeometry args={[0.013, 24]} />
+              <meshBasicMaterial color="#0284c7" transparent opacity={0.15} />
+            </mesh>
+            {/* Crosshair horizontal */}
+            <mesh position={[0, 0.0001, 0]}>
+              <boxGeometry args={[0.012, 0.0001, 0.001]} />
+              <meshBasicMaterial color="#7dd3fc" />
+            </mesh>
+            {/* Crosshair vertical */}
+            <mesh position={[0, 0.0001, 0]}>
+              <boxGeometry args={[0.001, 0.0001, 0.012]} />
+              <meshBasicMaterial color="#7dd3fc" />
+            </mesh>
+
+            {/* Slot index label */}
+            <Billboard position={[0, 0.0005, plateWidth / 2 - 0.01]}>
+              <Text fontSize={0.011} color="#e0f2fe" anchorX="center" anchorY="middle">
+                {`#${i + 1}`}
+              </Text>
+            </Billboard>
+          </group>
+        );
+      })}
+
+      {/* Dimension Line between slot 1 and 2 showing 35 mm */}
+      <group position={[-((slotCount - 1) * pitch) / 2 + pitch / 2, 0.0035, -plateWidth / 2 + 0.01]}>
+        <mesh position={[0, 0, 0]}>
+          <boxGeometry args={[pitch, 0.0004, 0.001]} />
+          <meshBasicMaterial color="#fbbf24" />
+        </mesh>
+        <Billboard position={[0, 0.012, 0]}>
+          <Text fontSize={0.009} color="#fbbf24" anchorX="center" anchorY="bottom">
+            ΔX = 35 mm
+          </Text>
+        </Billboard>
+      </group>
+
+      {/* Main Pallet Label */}
+      <Billboard position={[0, 0.035, 0]}>
+        <Text fontSize={0.014} color="#38bdf8" anchorX="center" anchorY="bottom">
+          Paleta liniowa (skok 35 mm)
+        </Text>
+      </Billboard>
+    </group>
+  );
+}
+
+function ControlDesk({
+  inputsActive = {},
+  outputsActive = {},
+  onToggleInput,
+}: {
+  inputsActive?: Record<string, boolean>;
+  outputsActive?: Record<string, boolean>;
+  onToggleInput?: (name: string) => void;
+}) {
+  const s1On = Boolean(inputsActive["di_Start"] || inputsActive["S1"]);
+  const s2On = Boolean(inputsActive["di_Kierunek"] || inputsActive["S2"]);
+  const h1On = Boolean(outputsActive["do_LampkaH1"] || outputsActive["H1"]);
+  const h2On = Boolean(outputsActive["do_LampkaH2"] || outputsActive["H2"]);
+
+  return (
+    <group position={[0.07, 0.2005, -0.245]}>
+      {/* Console Base / Slanted Enclosure */}
+      <mesh position={[0, 0.02, 0]} rotation={[-0.2, 0, 0]} castShadow receiveShadow>
+        <boxGeometry args={[0.13, 0.035, 0.08]} />
+        <meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.3} />
+      </mesh>
+
+      {/* Slanted Faceplate */}
+      <group position={[0, 0.036, 0]} rotation={[-0.2, 0, 0]}>
+        {/* Lamp H1 (Green - Detection on Belt) */}
+        <group position={[-0.042, 0.003, -0.015]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.007, 0.008, 0.008, 16]} />
+            <meshStandardMaterial
+              color={h1On ? "#22c55e" : "#14532d"}
+              emissive={h1On ? "#22c55e" : "#000000"}
+              emissiveIntensity={h1On ? 0.9 : 0}
+              roughness={0.2}
+            />
+          </mesh>
+          <Billboard position={[0, 0.015, 0]}>
+            <Text fontSize={0.008} color={h1On ? "#86efac" : "#64748b"} anchorX="center" anchorY="bottom">
+              H1 (Detekcja)
+            </Text>
+          </Billboard>
+        </group>
+
+        {/* Lamp H2 (Red - Cycle End) */}
+        <group position={[-0.014, 0.003, -0.015]}>
+          <mesh castShadow>
+            <cylinderGeometry args={[0.007, 0.008, 0.008, 16]} />
+            <meshStandardMaterial
+              color={h2On ? "#ef4444" : "#7f1d1d"}
+              emissive={h2On ? "#ef4444" : "#000000"}
+              emissiveIntensity={h2On ? 0.9 : 0}
+              roughness={0.2}
+            />
+          </mesh>
+          <Billboard position={[0, 0.015, 0]}>
+            <Text fontSize={0.008} color={h2On ? "#fca5a5" : "#64748b"} anchorX="center" anchorY="bottom">
+              H2 (Koniec)
+            </Text>
+          </Billboard>
+        </group>
+
+        {/* Button S1 (START) */}
+        <group
+          position={[0.016, 0.003, -0.015]}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleInput?.("di_Start");
+          }}
+        >
+          <mesh castShadow>
+            <cylinderGeometry args={[0.007, 0.0075, s1On ? 0.004 : 0.007, 16]} />
+            <meshStandardMaterial color={s1On ? "#4ade80" : "#16a34a"} roughness={0.3} />
+          </mesh>
+          <Billboard position={[0, 0.015, 0]}>
+            <Text fontSize={0.008} color={s1On ? "#4ade80" : "#94a3b8"} anchorX="center" anchorY="bottom">
+              S1 START
+            </Text>
+          </Billboard>
+        </group>
+
+        {/* Switch S2 (Direction: 1=LEWO, 0=PRAWO) */}
+        <group
+          position={[0.044, 0.003, -0.015]}
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleInput?.("di_Kierunek");
+          }}
+        >
+          <mesh castShadow rotation={[0, s2On ? 0.5 : -0.5, 0]}>
+            <boxGeometry args={[0.004, 0.012, 0.014]} />
+            <meshStandardMaterial color="#f59e0b" roughness={0.3} metalness={0.4} />
+          </mesh>
+          <Billboard position={[0, 0.015, 0]}>
+            <Text fontSize={0.008} color={s2On ? "#fbbf24" : "#cbd5e1"} anchorX="center" anchorY="bottom">
+              {s2On ? "S2: LEWO" : "S2: PRAWO"}
+            </Text>
+          </Billboard>
+        </group>
+
+        {/* Console Title */}
+        <Billboard position={[0, 0.001, 0.024]}>
+          <Text fontSize={0.009} color="#94a3b8" anchorX="center" anchorY="middle">
+            Pulpit sterowniczy
+          </Text>
+        </Billboard>
+      </group>
+    </group>
+  );
+}
+
 function SorterBins() {
-  const [b1x, b1y, b1z] = targets.pBin1;
-  const [b2x, b2y, b2z] = targets.pBin2;
-  const [ox, oy] = targets.pAboveObstacle;
+  const [b1x, b1y] = targets.pBin1 ?? [270, 340, 260];
+  const [b2x, b2y] = targets.pBin2 ?? [270, 540, 260];
+  const [ox, oy] = targets.pAboveObstacle ?? [270, 440, 360];
 
   return (
     <group>
@@ -1402,7 +1589,7 @@ function SorterBins() {
 }
 
 function ToolStand() {
-  const [rx, ry, rz] = targets.pToolRack;
+  const [rx, ry, rz] = targets.pToolRack ?? [0, 220, 220];
   return (
     <group position={[rx / 1000, rz / 1000, -ry / 1000]}>
       <mesh position={[0, 0, 0]} castShadow>
@@ -1541,6 +1728,9 @@ function Workpiece({
   allBlocks?: BlockItem[];
 }) {
   const [blockObject, setBlockObject] = useState<Group>();
+  if (!position || !Array.isArray(position) || position.length < 3) {
+    return null;
+  }
   const [x, y, z] = position.map((value) => value / 1000);
   const isMetal = material === "metal";
 
@@ -1703,6 +1893,10 @@ export function RobotScene({
   showGravityFeeder = true,
   showSorterBins = false,
   showMountingPins = false,
+  showLinearPallet = false,
+  showControlDesk = false,
+  outputs = {},
+  onToggleInput,
 }: Props) {
   const [isDragging, setIsDragging] = useState(false);
   const handleDragStart = () => {
@@ -1717,8 +1911,12 @@ export function RobotScene({
   }, []);
 
   const inspectPoints = [
-    ...visibleTargets.map((name) => targets[name]),
-    ...(tool === "gripper" ? blocks.map((b) => b.position) : []),
+    ...(visibleTargets || [])
+      .map((name) => targets?.[name])
+      .filter((p): p is [number, number, number] => Boolean(p && Array.isArray(p) && p.length === 3)),
+    ...(tool === "gripper"
+      ? (blocks || []).filter((b) => b && Array.isArray(b.position) && b.position.length === 3).map((b) => b.position)
+      : []),
   ];
   return (
     <Canvas
@@ -1748,14 +1946,20 @@ export function RobotScene({
       {showTable && showConveyor && (
         <ConveyorBelt running={conveyorRunning} dir={conveyorDir} sensorsActive={sensorsActive} />
       )}
-      {showTable && <InductiveSensorB5 active={sensorsActive["B5"]} />}
+      {showTable && !showLinearPallet && <InductiveSensorB5 active={sensorsActive["B5"]} />}
       {showTable && (tool === "pen" || showPaper) && <DrawingPaperSheet activeWObj={activeWObj} />}
-      {showTable && showGravityFeeder && <GravityFeeder />}
+      {showTable && showGravityFeeder && (
+        <GravityFeeder bMagActive={Boolean(sensorsActive["di_MagazynDetale"] || sensorsActive["B_MAG"] || sensorsActive["B5"])} />
+      )}
       {showTable && showSorterBins && <SorterBins />}
       {showTable && showMountingPins && <MountingPins targets={targets} b1Active={Boolean(sensorsActive["B1"])} />}
       {showTable && showToolRack && <ToolStand />}
+      {showTable && showLinearPallet && <LinearPallet targets={targets} />}
+      {showTable && (showControlDesk || showLinearPallet) && (
+        <ControlDesk inputsActive={sensorsActive} outputsActive={outputs} onToggleInput={onToggleInput} />
+      )}
       <Robot tcp={tcp} tcpPitch={tcpPitch} editing={tcpEditing} onSelectTcp={onSelectTcp} onMoveTcp={onMoveTcp} onDragStart={handleDragStart} tool={tool} gripperClosed={gripperClosed} inspectPoints={inspectPoints} fadeWhileRunning={fadeWhileRunning} />
-      {blocks.map((block) => (
+      {(blocks || []).map((block) => (
         <Workpiece
           key={block.id}
           id={block.id}
@@ -1773,20 +1977,32 @@ export function RobotScene({
           allBlocks={blocks}
         />
       ))}
-      {visibleTargets.map((name) => (
-        <Marker
-          key={name}
-          name={name}
-          position={targets[name]}
-          active={name === target || name === selectedTarget}
-          editable={name === selectedTarget}
-          onSelect={() => onSelectTarget(name)}
-          onMove={(position) => onMoveTarget(name, position)}
-          onDragStart={handleDragStart}
-          onContextMenu={(screenPosition) => onTargetContextMenu(screenPosition, name)}
+      {(visibleTargets || [])
+        .filter((name) => targets && targets[name] && Array.isArray(targets[name]))
+        .map((name) => (
+          <Marker
+            key={name}
+            name={name}
+            position={targets[name]}
+            active={name === target || name === selectedTarget}
+            editable={name === selectedTarget}
+            onSelect={() => onSelectTarget(name)}
+            onMove={(position) => onMoveTarget(name, position)}
+            onDragStart={handleDragStart}
+            onContextMenu={(screenPosition) => onTargetContextMenu(screenPosition, name)}
+          />
+        ))}
+      {Array.isArray(trail) && trail.length > 1 && (
+        <Line
+          points={trail
+            .filter((p) => p && Array.isArray(p) && p.length === 3)
+            .map(([x, y, z]) => [x / 1000, z / 1000, -y / 1000])}
+          color="#e3a13c"
+          lineWidth={1.6}
+          transparent
+          opacity={0.9}
         />
-      ))}
-      {trail.length > 1 && <Line points={trail.map(([x, y, z]) => [x / 1000, z / 1000, -y / 1000])} color="#e3a13c" lineWidth={1.6} transparent opacity={0.9} />}
+      )}
       <OrbitControls makeDefault enabled={!isDragging} minDistance={0.6} maxDistance={3.5} maxPolarAngle={Math.PI / 2.05} />
     </Canvas>
   );

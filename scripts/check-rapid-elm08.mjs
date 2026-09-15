@@ -110,17 +110,17 @@ console.log("--- Testing DInput and DOutput in expressions ---");
   console.log("✓ PASS: DInput and DOutput signal expression evaluations");
 }
 
-console.log("--- Testing all 12 ELM.08 Exam Starter Codes Compilation ---");
+console.log("--- Testing all 13 ELM.08 Exam Starter Codes Compilation ---");
 {
   const elmTasks = tasks.filter((t) => t.category === "elm08");
-  assert(elmTasks.length === 12, `Expected 12 ELM.08 tasks, found ${elmTasks.length}`);
+  assert(elmTasks.length === 13, `Expected 13 ELM.08 tasks, found ${elmTasks.length}`);
 
   for (const t of elmTasks) {
     const res = compile(t.starterCode, targets);
     assert(!res.error, `Task ${t.id} failed compilation: ${res.error}`);
     console.log(`  ✓ Task ${t.id} (${t.title.split(":")[0]}) compiled (${res.commands.length} commands)`);
   }
-  console.log("✓ PASS: All 12 ELM.08 exam starter programs compiled with 0 errors!");
+  console.log("✓ PASS: All 13 ELM.08 exam starter programs compiled with 0 errors!");
 }
 
 console.log("\nALL RAPID ELM.08 COMPILER TESTS PASSED SUCCESSFULLY!");

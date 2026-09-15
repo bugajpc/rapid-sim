@@ -66,6 +66,7 @@ export type Command =
       targetOffsetExpr?: [string, string, string];
       viaOffset?: [number, number, number];
       viaOffsetExpr?: [string, string, string];
+      isRelTool?: boolean;
       wobj?: string;
       speed?: number; // mm/s
       zone?: string;
@@ -130,6 +131,19 @@ export const targets: Record<string, [number, number, number]> = {
   // Drop/gravity feeder (mounted on right table zone)
   pFeederApproach: [180, 440, 350],
   pFeederPick: [180, 440, 255],
+
+  // Exam ELM.08-113: Kierunkowa segregacja i liniowa paletyzacja detali
+  pMag_Appr: [180, 440, 305],
+  pMag_Pick: [180, 440, 255],
+  pTasma_Appr: [-195, 440, 305],
+  pTasma_Put: [-195, 440, 255],
+  pLewy_Appr: [-310, 440, 305],
+  pLewy_Pick: [-310, 440, 255],
+  pPrawy_Appr: [-60, 440, 305],
+  pPrawy_Pick: [-60, 440, 255],
+  pPaleta_Baza: [-70, 310, 245],
+  pPaleta_Appr: [-70, 310, 295],
+  CRobT: [0, 490, 530],
 
   // Sensors
   pSensorB5Approach: [110, 310, 380],
@@ -2055,6 +2069,207 @@ ENDMODULE`,
 
 ENDMODULE`,
   },
+  {
+    id: "task-elm08-113",
+    sheetId: "CKE ELM.08-113",
+    workstationDescription: "Stanowisko zrobotyzowane do kierunkowej segregacji i liniowej paletyzacji wyposażone w 6-osiowego robota przemysłowego z pneumatycznym chwytakiem dwuszczękowym sterowanym bistabilnie (cewki Y1/Y2: do_ChwytakON, do_ChwytakOFF). W przestrzeni roboczej zamontowano: 1. Magazyn opadowy detali z czujnikiem obecności B_MAG (di_MagazynDetale), 2. Dwukierunkowy przenośnik taśmowy z dwoma czujnikami krańcowymi B_LEWY (di_CzujnikLewy) i B_PRAWY (di_CzujnikPrawy), 3. Pole odkładcze paletyzacji liniowej z krokiem 35 mm, 4. Pulpit sterowniczy z przyciskiem START S1 (di_Start), wyborem kierunku S2 (di_Kierunek: 1=LEWO, 0=PRAWO) oraz lampkami sygnalizacyjnymi H1 (do_LampkaH1) i H2 (do_LampkaH2).",
+    signalsTable: [
+      { name: "di_Start (S1)", type: "DI", description: "Przycisk monostabilny START cyklu automatycznego (styk NO, listwa X3:1 / DI[1])" },
+      { name: "di_Kierunek (S2)", type: "DI", description: "Przycisk/przełącznik wyboru kierunku transportu detalu (1 = LEWO, 0 = PRAWO, listwa X3:2 / DI[2])" },
+      { name: "di_CzujnikLewy (B_LEWY)", type: "DI", description: "Czujnik optyczny detalu – lewy kraniec taśmy przy pozycjonerze (B1/B4, listwa X3:3 / DI[3])" },
+      { name: "di_CzujnikPrawy (B_PRAWY)", type: "DI", description: "Czujnik optyczny detalu – prawy kraniec taśmy (B3, listwa X3:5 / DI[5])" },
+      { name: "di_MagazynDetale (B_MAG)", type: "DI", description: "Czujnik obecności detalu na dole magazynu opadowego (B5, listwa X3:7 / DI[7])" },
+      { name: "do_LampkaH1 (H1)", type: "DO", description: "Lampka zielona: sygnalizacja detekcji detalu na krańcu taśmy (listwa X4:1 / DO[1])" },
+      { name: "do_LampkaH2 (H2)", type: "DO", description: "Lampka czerwona: sygnalizacja zakończenia partii produkcyjnej (listwa X4:2 / DO[2])" },
+      { name: "do_ChwytakON (Cewka Y1)", type: "DO", description: "Sygnał zamknięcia szczęk chwytaka pneumatycznego (zawór 5/2, listwa X4:4 / DO[4])" },
+      { name: "do_ChwytakOFF (Cewka Y2)", type: "DO", description: "Sygnał otwarcia szczęk chwytaka pneumatycznego (zawór 5/2, listwa X4:5 / DO[5])" },
+      { name: "do_TasmaStart (Przekaźnik K1)", type: "DO", description: "Załączenie napędu taśmociągu: 1 = START, 0 = STOP (listwa X4:6 / DO[6])" },
+      { name: "do_TasmaKierunek (Przekaźnik K2)", type: "DO", description: "Kierunek przesuwu taśmociągu: 0 = LEWO, 1 = PRAWO (listwa X4:7 / DO[7])" },
+    ],
+    targetsTable: [
+      { name: "pHome", description: "Główna pozycja bazowa początkowa i spoczynkowa robota [0, 490, 530]" },
+      { name: "pMag_Appr", description: "Punkt najazdowy 50 mm pionowo nad detalem w magazynie [180, 440, 305]" },
+      { name: "pMag_Pick", description: "Punkt chwytu dolnego detalu w szczelinie magazynu opadowego [180, 440, 255]" },
+      { name: "pTasma_Appr", description: "Punkt najazdowy 50 mm nad środkiem taśmy transportowej [-195, 440, 305]" },
+      { name: "pTasma_Put", description: "Punkt odłożenia detalu na powierzchnię środka taśmy [-195, 440, 255]" },
+      { name: "pLewy_Pick", description: "Punkt pobrania detalu przy lewym czujniku taśmy di_CzujnikLewy [-310, 440, 255]" },
+      { name: "pPrawy_Pick", description: "Punkt pobrania detalu przy prawym czujniku taśmy di_CzujnikPrawy [-60, 440, 255]" },
+      { name: "pPaleta_Baza", description: "Baza palety liniowej – pierwsze gniazdo odkładcze [-70, 310, 245]" },
+    ],
+    procedureSteps: [
+      "1. Inicjalizacja: ramię w pHome, chwytak otwarty (do_ChwytakOFF=1, do_ChwytakON=0), wyłączone napędy i lampki H1, H2, zerowanie liczników nLewo=0, nPrawo=0, nSuma=0.",
+      "2. Oczekiwanie na wciśnięcie przycisku S1 (WaitDI di_Start, 1;).",
+      "3. Pętla główna dopóki czujnik w magazynie wykrywa detal: WHILE di_MagazynDetale = 1 DO.",
+      "4. Pobranie detalu z magazynu opadowego: najazd pMag_Appr (v200), zjazd liniowy pMag_Pick (v100), zamknięcie chwytaka (do_ChwytakON=1, do_ChwytakOFF=0, zwłoka 0.3 s), wyjazd do pMag_Appr.",
+      "5. Odłożenie na środek taśmy: dojazd pTasma_Appr, zjazd pTasma_Put, otwarcie chwytaka (do_ChwytakOFF=1, zwłoka 0.5 s), odjazd w górę do pTasma_Appr.",
+      "6. Decyzja o kierunku: odczyt di_Kierunek. Jeśli di_Kierunek = 1: kierunek LEWO (do_TasmaKierunek=0, do_TasmaStart=1), inkrementacja nLewo, oczekiwanie na di_CzujnikLewy=1. Jeśli di_Kierunek = 0: kierunek PRAWO (do_TasmaKierunek=1, do_TasmaStart=1), inkrementacja nPrawo, oczekiwanie na di_CzujnikPrawy=1.",
+      "7. Zatrzymanie taśmy (do_TasmaStart=0) i zapalenie zielonej lampki H1 (do_LampkaH1=1).",
+      "8. Pobranie z krańca taśmy: dojazd 40 mm nad pozycję pobrania (RelTool lub Offs), zjazd do pLewy_Pick / pPrawy_Pick, zaciśnięcie chwytaka (do_ChwytakON=1, zwłoka 0.5 s), pionowy wyjazd 50 mm w górę.",
+      "9. Liniowa paletyzacja z offsetem: wyliczenie przesunięcia w osi X (OffsetX = nSuma * 35 mm), dojazd 50 mm nad wyliczone gniazdo palety Offs(pPaleta_Baza, nSuma * 35, 0, 50), zjazd na wysokość palety, otwarcie chwytaka (do_ChwytakOFF=1, zwłoka 0.5 s), wyjazd w górę, wygaszenie lampki H1, inkrementacja nSuma.",
+      "10. Zakończenie pracy (brak detali w magazynie di_MagazynDetale = 0): powrót do pHome, zapalenie lampki H2, wyświetlenie raportu na Teach Pendancie z podsumowaniem (nLewo, nPrawo, nSuma) i zatrzymanie programu (Stop).",
+    ],
+    evaluationCriteria: [
+      "1. Konfiguracja punktów i narzędzia: zdefiniowano punkty bazowe pHome, magazynu, środka taśmy, krańców taśmy oraz bazy palety z bezpiecznymi trajektoriami dojazdu (20 pkt).",
+      "2. Logika pobierania i pętla magazynu: program prawidłowo sprawdza stan czujnika di_MagazynDetale i wykonuje pobrania do momentu opróżnienia zasobnika (20 pkt).",
+      "3. Sterowanie przenośnikiem i obsługa DI: poprawna interpretacja stanu przycisku di_Kierunek, ustawienie do_TasmaStart i do_TasmaKierunek, zatrzymanie po czujnikach krańcowych i sygnalizacja lampką H1 (20 pkt).",
+      "4. Liniowa paletyzacja z offsetem: detale odkładane w jednym rzędzie z przesunięciem proporcjonalnym do licznika nSuma * 35 mm, z zachowaniem bezkolizyjnych dojazdów i odjazdów (25 pkt).",
+      "5. Zliczanie, raportowanie i zakończenie: powrót do pHome, załączenie lampki H2, wyświetlenie czytelnego raportu produkcji z wartościami liczników na Teach Pendancie oraz instrukcja Stop (15 pkt).",
+    ],
+    title: "ELM.08-113: Kierunkowa segregacja i liniowa paletyzacja detali z raportowaniem danych",
+    category: "elm08",
+    topic: "Kwalifikacja ELM.08 · Zadanie egzaminacyjne 113",
+    summary: "Programowanie zrobotyzowanego gniazda segregacji i paletyzacji. Robot pobiera detale z magazynu opadowego dopóki czujnik di_MagazynDetale ma stan wysoki. Odkłada detale na środek taśmociągu, po czym na podstawie stanu przycisku di_Kierunek kieruje detal w LEWO lub w PRAWO. Po dotarciu do czujnika krańcowego taśma staje, zapala się lampka H1, a robot pobiera detal i układa go na palecie liniowej ze skokiem 35 mm. Po wyczerpaniu detali w magazynie robot powraca do HOME, zapala lampkę H2 i wyświetla raport produkcji na konsoli FlexPendanta.",
+    tool: "gripper",
+    defaultInputs: {
+      S1: false,
+      di_Start: false,
+      di_Kierunek: false,
+      di_CzujnikLewy: false,
+      di_CzujnikPrawy: false,
+      di_MagazynDetale: true,
+    },
+    defaultOutputs: {
+      H1: false,
+      H2: false,
+      do_LampkaH1: false,
+      do_LampkaH2: false,
+      do_ChwytakON: false,
+      do_ChwytakOFF: true,
+      do_TasmaStart: false,
+      do_TasmaKierunek: false,
+    },
+    showConveyor: true,
+    showGravityFeeder: true,
+    showSorterBins: false,
+    blocks: [
+      { id: "part-1", position: [180, 440, 255], material: "plastic" },
+      { id: "part-2", position: [180, 440, 255 + 48], material: "plastic" },
+      { id: "part-3", position: [180, 440, 255 + 96], material: "plastic" },
+      { id: "part-4", position: [180, 440, 255 + 144], material: "plastic" },
+    ],
+    tips: [
+      "Deklaracja zmiennych licznikowych: VAR num nLewo := 0; VAR num nPrawo := 0; VAR num nSuma := 0; VAR num nKrok := 35;",
+      "Pętla główna uwarunkowana czujnikiem: WHILE di_MagazynDetale = 1 DO ... ENDWHILE",
+      "Sterowanie kierunkiem taśmy: w LEWO: Reset do_TasmaKierunek; Set do_TasmaStart; w PRAWO: Set do_TasmaKierunek; Set do_TasmaStart;",
+      "Zatrzymanie taśmy po czujniku: WaitDI di_CzujnikLewy, 1; Reset do_TasmaStart; Set do_LampkaH1;",
+      "Liniowa paletyzacja z offsetem w osi X: MoveJ Offs(pPaleta_Baza, nSuma * nKrok, 0, 50), v200, z10, tChwytak;",
+      "Raport końcowy na panelu FlexPendant: TPWrite \"Detale LEWO : \" \\Num:=nLewo; itd.",
+    ],
+    starterCode: `MODULE ModulEgzaminacyjny
+    ! =================================================================
+    ! ARKUSZ EGZAMINACYJNY CKE ELM.08 - ZADANIE 113
+    ! Kierunkowa segregacja i liniowa paletyzacja detali z raportowaniem
+    ! =================================================================
+
+    ! Deklaracja zmiennych licznikowych
+    VAR num nLewo := 0;
+    VAR num nPrawo := 0;
+    VAR num nSuma := 0;
+    VAR num nKrok := 35; ! Odstep miedzy detalami w mm
+
+    PROC main()
+        ! 1. Inicjalizacja stanowiska
+        Reset do_TasmaStart;
+        Reset do_TasmaKierunek;
+        Reset do_LampkaH1;
+        Reset do_LampkaH2;
+        Set do_ChwytakOFF;
+        Reset do_ChwytakON;
+        
+        nLewo := 0;
+        nPrawo := 0;
+        nSuma := 0;
+        
+        MoveJ pHome, v200, fine, tChwytak;
+        TPWrite "Oczekiwanie na wcisniecie przycisku START (S1)...";
+        WaitDI di_Start, 1;
+        TPWrite "Rozpoczecie automatycznego cyklu pracy";
+        
+        ! 2. Petla glowna - dopoki detal jest obecny w magazynie opadowym
+        WHILE di_MagazynDetale = 1 DO
+            ! --- Krok 1: Pobranie detalu z magazynu opadowego ---
+            MoveJ pMag_Appr, v200, z10, tChwytak;
+            MoveL pMag_Pick, v100, fine, tChwytak;
+            Set do_ChwytakON;
+            Reset do_ChwytakOFF;
+            WaitTime 0.2;
+            MoveL RelTool(CRobT(), 0, 0, -50), v150, z10, tChwytak;
+            
+            ! --- Krok 2: Odlozenie detalu na srodek tasmy ---
+            MoveJ pTasma_Appr, v200, z10, tChwytak;
+            MoveL pTasma_Put, v100, fine, tChwytak;
+            Reset do_ChwytakON;
+            Set do_ChwytakOFF;
+            WaitTime 0.2;
+            MoveL RelTool(CRobT(), 0, 0, -50), v150, z10, tChwytak;
+            MoveJ pHome, v200, fine, tChwytak;
+            
+            ! --- Krok 3: Decyzja o kierunku transportu na podstawie di_Kierunek ---
+            IF di_Kierunek = 1 THEN
+                ! Kierunek LEWO
+                Reset do_TasmaKierunek; ! 0 = LEWO
+                Set do_TasmaStart;
+                nLewo := nLewo + 1;
+                TPWrite "Transport w LEWO -> Oczekiwanie na czujnik lewy...";
+                
+                WaitDI di_CzujnikLewy, 1;
+                Reset do_TasmaStart;
+                Set do_LampkaH1;
+                
+                ! Dojazd i pobranie z lewego konca tasmy
+                MoveJ pLewy_Appr, v200, z10, tChwytak;
+                MoveL pLewy_Pick, v100, fine, tChwytak;
+            ELSE
+                ! Kierunek PRAWO
+                Set do_TasmaKierunek; ! 1 = PRAWO
+                Set do_TasmaStart;
+                nPrawo := nPrawo + 1;
+                TPWrite "Transport w PRAWO -> Oczekiwanie na czujnik prawy...";
+                
+                WaitDI di_CzujnikPrawy, 1;
+                Reset do_TasmaStart;
+                Set do_LampkaH1;
+                
+                ! Dojazd i pobranie z prawego konca tasmy
+                MoveJ pPrawy_Appr, v200, z10, tChwytak;
+                MoveL pPrawy_Pick, v100, fine, tChwytak;
+            ENDIF
+            
+            ! Chwyt detalu z tasmy i pionowy wyjazd w gore
+            Set do_ChwytakON;
+            Reset do_ChwytakOFF;
+            WaitTime 0.2;
+            MoveL RelTool(CRobT(), 0, 0, -50), v150, z10, tChwytak;
+            
+            ! --- Krok 4: Liniowa paletyzacja z dynamicznym offsetem w osi X ---
+            MoveJ Offs(pPaleta_Appr, nSuma * nKrok, 0, 0), v200, z10, tChwytak;
+            MoveL Offs(pPaleta_Baza, nSuma * nKrok, 0, 0), v100, fine, tChwytak;
+            Reset do_ChwytakON;
+            Set do_ChwytakOFF;
+            WaitTime 0.2;
+            MoveL Offs(pPaleta_Appr, nSuma * nKrok, 0, 0), v150, z10, tChwytak;
+            
+            Reset do_LampkaH1;
+            nSuma := nSuma + 1;
+            MoveJ pHome, v200, fine, tChwytak;
+        ENDWHILE
+        
+        ! 3. Zakonczenie partii produkcyjnej
+        MoveJ pHome, v200, fine, tChwytak;
+        Set do_LampkaH2;
+        
+        ! 4. Raport produkcji na konsoli Teach Pendanta
+        TPErase;
+        TPWrite "=== RAPORT PRODUKCJI ===";
+        TPWrite "Detale LEWO : " \Num:=nLewo;
+        TPWrite "Detale PRAWO: " \Num:=nPrawo;
+        TPWrite "RAZEM       : " \Num:=nSuma;
+        TPWrite "========================";
+        Stop;
+    ENDPROC
+
+ENDMODULE`,
+  },
 ];
 export const blankProjectCode = `MODULE MainModule
 
@@ -2609,24 +2824,34 @@ export function splitTopLevelArgs(argsStr: string): string[] {
   return result;
 }
 
-function parseTargetExpr(str: string, targetLibrary: Record<string, [number, number, number]>): { target: string; offset?: [number, number, number]; offsetExpr?: [string, string, string] } | null {
+function parseTargetExpr(
+  str: string,
+  targetLibrary: Record<string, [number, number, number]>
+): { target: string; offset?: [number, number, number]; offsetExpr?: [string, string, string]; isRelTool?: boolean } | null {
   const trimmed = str.trim();
-  const offsMatch = trimmed.match(/^Offs\s*\(\s*([A-Za-z_]\w*)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/i);
+  const offsMatch = trimmed.match(/^(Offs|RelTool)\s*\(\s*([A-Za-z_]\w*(?:\(\))?)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/i);
   if (offsMatch) {
-    const rawTarget = offsMatch[1];
-    const canonical = findTargetKey(targetLibrary, rawTarget);
+    const isRelTool = offsMatch[1].toLowerCase() === "reltool";
+    const rawTarget = offsMatch[2].replace(/\(\)$/, "");
+    const canonical = rawTarget.toLowerCase() === "crobt" ? "CRobT" : findTargetKey(targetLibrary, rawTarget);
     if (!canonical) return null;
-    const exprX = offsMatch[2].trim();
-    const exprY = offsMatch[3].trim();
-    const exprZ = offsMatch[4].trim();
+    const exprX = offsMatch[3].trim();
+    const exprY = offsMatch[4].trim();
+    const exprZ = offsMatch[5].trim();
     const dx = Number(evaluateExpression(exprX, { variables: {}, targetLibrary })) || 0;
     const dy = Number(evaluateExpression(exprY, { variables: {}, targetLibrary })) || 0;
-    const dz = Number(evaluateExpression(exprZ, { variables: {}, targetLibrary })) || 0;
+    const rawDz = Number(evaluateExpression(exprZ, { variables: {}, targetLibrary })) || 0;
+    const dz = isRelTool && rawDz < 0 ? -rawDz : rawDz;
     return {
       target: canonical,
       offset: [dx, dy, dz],
       offsetExpr: [exprX, exprY, exprZ],
+      isRelTool,
     };
+  }
+
+  if (/^CRobT(?:\(\))?$/i.test(trimmed)) {
+    return { target: "CRobT" };
   }
 
   const canonical = findTargetKey(targetLibrary, trimmed);
@@ -2994,6 +3219,7 @@ export function compile(
           target: parsedTarget.target,
           targetOffset: parsedTarget.offset,
           targetOffsetExpr: parsedTarget.offsetExpr,
+          isRelTool: parsedTarget.isRelTool,
           speed: speedVal,
           zone: zoneVal,
           tool: toolVal,
@@ -3040,6 +3266,7 @@ export function compile(
           target: parsedTarget.target,
           targetOffset: parsedTarget.offset,
           targetOffsetExpr: parsedTarget.offsetExpr,
+          isRelTool: parsedTarget.isRelTool,
           speed: speedVal,
           zone: zoneVal,
           tool: toolVal,
@@ -3142,11 +3369,11 @@ export function targetNamesInCode(code: string, targetLibrary: Record<string, [n
   for (const line of code.split("\n")) {
     const source = removeComment(line);
     const linearMotion = source.match(/^\s*Move(?:J|L)\s+([A-Za-z_]\w*)/i);
-    const offsMotion = source.match(/Offs\s*\(\s*([A-Za-z_]\w*)/i);
+    const offsMotion = source.match(/(?:Offs|RelTool)\s*\(\s*([A-Za-z_]\w*)/i);
     const circularMotion = source.match(/^\s*MoveC\s+([A-Za-z_]\w*)\s*,\s*([A-Za-z_]\w*)/i);
 
     for (const rawName of [linearMotion?.[1], offsMotion?.[1], circularMotion?.[1], circularMotion?.[2]]) {
-      if (rawName) {
+      if (rawName && rawName.toLowerCase() !== "crobt") {
         const canonical = findTargetKey(targetLibrary, rawName);
         if (canonical) names.add(canonical);
       }

@@ -56,10 +56,16 @@ function extractSignalsFromCode(codeText: string, task?: Task): { inputs: Signal
     if (!(name in inputMap)) inputMap[name] = false;
   }
 
-  // Scan code for conditions on known inputs: S1..S9, B1..B9
-  for (const m of codeText.matchAll(/\b([SB]\d+)\s*=/gi)) {
+  // Scan code for conditions on known inputs: S1..S9, B1..B9, B_MAG, B_LEWY, B_PRAWY, di_*
+  for (const m of codeText.matchAll(/\b(di_[A-Za-z0-9_]+|[SB]\d+|B_LEWY|B_PRAWY|B_MAG)\b/gi)) {
     const name = m[1];
     if (!(name in inputMap)) inputMap[name] = false;
+  }
+
+  // Scan code for do_*
+  for (const m of codeText.matchAll(/\b(do_[A-Za-z0-9_]+)\b/gi)) {
+    const name = m[1];
+    if (!(name in outputMap)) outputMap[name] = false;
   }
 
   // Scan code for Set <sig>, Reset <sig>
@@ -99,6 +105,8 @@ export function App() {
   const [code, setCode] = useState(examples[0].code);
   const [projectName, setProjectName] = useState("Moj program");
   const [speedOverride, setSpeedOverride] = useState<number>(100);
+  const speedOverrideRef = useRef<number>(speedOverride);
+  speedOverrideRef.current = speedOverride;
   const [showConveyor, setShowConveyor] = useState<boolean>(true);
   const [showGravityFeeder, setShowGravityFeeder] = useState<boolean>(true);
   const isStepMode = useRef<boolean>(false);
@@ -628,8 +636,25 @@ export function App() {
     }
 
     if (command.type === "output") {
-      if (command.signal === "doGripper") setGripperOutput(command.value);
-      else {
+      if (command.signal === "doGripper") {
+        setGripperOutput(command.value);
+      } else if (command.signal === "do_ChwytakON") {
+        setOutputs((values) => ({ ...values, do_ChwytakON: command.value, ...(command.value ? { doGripper: true, do_ChwytakOFF: false } : {}) }));
+        outputsRef.current["do_ChwytakON"] = command.value;
+        if (command.value) {
+          outputsRef.current["doGripper"] = true;
+          outputsRef.current["do_ChwytakOFF"] = false;
+          setGripperOutput(true);
+        }
+      } else if (command.signal === "do_ChwytakOFF") {
+        setOutputs((values) => ({ ...values, do_ChwytakOFF: command.value, ...(command.value ? { doGripper: false, do_ChwytakON: false } : {}) }));
+        outputsRef.current["do_ChwytakOFF"] = command.value;
+        if (command.value) {
+          outputsRef.current["doGripper"] = false;
+          outputsRef.current["do_ChwytakON"] = false;
+          setGripperOutput(false);
+        }
+      } else {
         setOutputs((values) => ({ ...values, [command.signal]: command.value }));
         outputsRef.current[command.signal] = command.value;
       }
@@ -641,11 +666,17 @@ export function App() {
     if (command.type === "pulse") {
       setOutputs((values) => ({ ...values, [command.signal]: true }));
       outputsRef.current[command.signal] = true;
+      if (command.signal === "do_ChwytakON") {
+        setGripperOutput(true);
+      } else if (command.signal === "do_ChwytakOFF") {
+        setGripperOutput(false);
+      }
       log(`PulseDO ${command.signal} (${command.length}s)`);
+      const pulseMs = Math.max(40, (command.length * 1000) / Math.max(0.2, speedOverrideRef.current / 100));
       window.setTimeout(() => {
         setOutputs((values) => ({ ...values, [command.signal]: false }));
         outputsRef.current[command.signal] = false;
-      }, command.length * 1000);
+      }, pulseMs);
       finishCmd(true);
       return;
     }
@@ -744,24 +775,31 @@ export function App() {
     }
 
     if (command.type === "wait") {
-      timer.current = window.setTimeout(() => finishCmd(true), command.seconds * 1000);
+      const waitMs = Math.max(40, (command.seconds * 1000) / Math.max(0.2, speedOverrideRef.current / 100));
+      timer.current = window.setTimeout(() => finishCmd(true), waitMs);
       return;
     }
 
     if (command.type === "move") {
       setTarget(command.target);
-      const baseDest = targetPositionsRef.current[command.target] || targets[command.target] || defaultTcp;
-      let destination: [number, number, number] = [...baseDest];
+      const baseDest =
+        command.target.toLowerCase() === "crobt"
+          ? [...tcpRef.current]
+          : targetPositionsRef.current[command.target] || targets[command.target] || defaultTcp;
+      let destination: [number, number, number] = [baseDest[0], baseDest[1], baseDest[2]];
       if (command.targetOffsetExpr) {
         const dx = Number(evaluateExpression(command.targetOffsetExpr[0], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
         const dy = Number(evaluateExpression(command.targetOffsetExpr[1], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
-        const dz = Number(evaluateExpression(command.targetOffsetExpr[2], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+        const rawDz = Number(evaluateExpression(command.targetOffsetExpr[2], { variables: variablesRef.current, targetLibrary: targetPositionsRef.current, inputs: inputsRef.current, outputs: outputsRef.current })) || 0;
+        const dz = command.isRelTool && rawDz < 0 ? -rawDz : rawDz;
         destination = [destination[0] + dx, destination[1] + dy, destination[2] + dz];
       } else if (command.targetOffset) {
+        const rawDz = command.targetOffset[2];
+        const dz = command.isRelTool && rawDz < 0 ? -rawDz : rawDz;
         destination = [
           destination[0] + command.targetOffset[0],
           destination[1] + command.targetOffset[1],
-          destination[2] + command.targetOffset[2],
+          destination[2] + dz,
         ];
       }
       if (command.wobj && defaultWorkObjects[command.wobj]) {
@@ -803,8 +841,9 @@ export function App() {
       const started = performance.now();
       const dist = Math.hypot(destination[0] - start[0], destination[1] - start[1], destination[2] - start[2]);
       const commandedSpeed = command.speed || (command.kind === "MoveJ" ? 250 : 100);
-      const speedFactor = Math.max(0.1, speedOverride / 100);
-      const duration = Math.max(250, (dist / (commandedSpeed * speedFactor)) * 1000);
+      const speedFactor = Math.max(0.1, speedOverrideRef.current / 100);
+      const rawDuration = (dist / (commandedSpeed * speedFactor)) * 1000;
+      const duration = Math.min(2200, Math.max(120, rawDuration));
 
       const animate = (now: number) => {
         if (cancelled.current) return;
@@ -982,8 +1021,16 @@ export function App() {
   useEffect(() => {
     const interval = window.setInterval(() => {
       // 1. Conveyor transport of resting workpieces
-      const isConvRunning = Boolean(outputsRef.current["doConvRun"] || outputsRef.current["START_STOP"]);
-      const isConvRight = Boolean(outputsRef.current["doConvDir"] || outputsRef.current["LEWO_PRAWO"]);
+      const isConvRunning = Boolean(
+        outputsRef.current["doConvRun"] ||
+        outputsRef.current["START_STOP"] ||
+        outputsRef.current["do_TasmaStart"]
+      );
+      const isConvRight = Boolean(
+        outputsRef.current["do_TasmaKierunek"] ||
+        outputsRef.current["LEWO_PRAWO"] ||
+        (outputsRef.current["doConvDir"] && !("do_TasmaKierunek" in outputsRef.current))
+      );
       if (isConvRunning) {
         setBlocks((prevBlocks) => {
           let changed = false;
@@ -991,11 +1038,18 @@ export function App() {
             if (heldBlockIdRef.current === b.id) return b;
             if (isOverConveyor(b.position[0], b.position[1])) {
               changed = true;
-              const deltaX = (isConvRight ? 1 : -1) * 5.0;
+              const speedMult = Math.max(0.5, speedOverrideRef.current / 100);
+              const deltaX = (isConvRight ? 1 : -1) * (10.0 * speedMult);
               let newX = b.position[0] + deltaX;
               let newZ = b.position[2];
-              if (newX < -370) {
-                newZ = Math.max(conveyorConfig.binZ, newZ - 8);
+              if (isConvRight) {
+                if (newX > -60) newX = -60;
+              } else {
+                if (selectedTask?.id === "task-elm08-113" || "di_CzujnikLewy" in inputsRef.current) {
+                  if (newX < -310) newX = -310;
+                } else if (newX < -370) {
+                  newZ = Math.max(conveyorConfig.binZ, newZ - 8);
+                }
               }
               return { ...b, position: [newX, b.position[1], newZ] as [number, number, number] };
             }
@@ -1009,27 +1063,60 @@ export function App() {
         });
       }
 
-      // 2. Sensor proximity detection
+      // 2. Gravity feeder automatic workpiece dropping
+      setBlocks((prevBlocks) => {
+        let changed = false;
+        const feederBlocks = prevBlocks
+          .filter((b) => b.id !== heldBlockIdRef.current && Math.hypot(b.position[0] - 180, b.position[1] - 440) < 40)
+          .sort((a, b) => a.position[2] - b.position[2]);
+
+        if (feederBlocks.length > 0) {
+          const nextBlocks = [...prevBlocks];
+          feederBlocks.forEach((fb, idx) => {
+            const targetZ = 255 + idx * 48;
+            if (fb.position[2] > targetZ + 1) {
+              changed = true;
+              const dropZ = Math.max(targetZ, fb.position[2] - 12);
+              const bIdx = nextBlocks.findIndex((b) => b.id === fb.id);
+              if (bIdx !== -1) {
+                nextBlocks[bIdx] = { ...fb, position: [fb.position[0], fb.position[1], dropZ] };
+              }
+            }
+          });
+          if (changed) {
+            blocksRef.current = nextBlocks;
+            return nextBlocks;
+          }
+        }
+        return prevBlocks;
+      });
+
+      // 3. Sensor proximity detection
       const curBlocks = blocksRef.current;
       let b1_b3 = false;
       let b2_b4 = false;
       let b5 = false;
+      let magHasPart = false;
 
       for (const b of curBlocks) {
-        // Infeed optical sensor B1/B3 at X = -60 mm (conveyor) OR Capacitive sensor B1 at pallet slot 4 [170, 310] (task 107)
+        // Infeed optical sensor B1/B3/di_CzujnikPrawy at X = -60 mm (conveyor) OR Capacitive sensor B1 at pallet slot 4 [170, 310] (task 107)
         if (
           (Math.abs(b.position[0] - (-60)) < 26 && Math.abs(b.position[1] - 440) < 45 && b.position[2] < 300) ||
           (Math.hypot(b.position[0] - 170, b.position[1] - 310) < 35 && b.position[2] < 280)
         ) {
           b1_b3 = true;
         }
-        // Discharge / packaging optical sensor B2/B4 at X = -310 mm
-        if (Math.abs(b.position[0] - (-310)) < 20 && Math.abs(b.position[1] - 440) < 45 && b.position[2] < 300) {
+        // Discharge / packaging optical sensor B2/B4/di_CzujnikLewy at X = -310 mm
+        if (Math.abs(b.position[0] - (-310)) < 26 && Math.abs(b.position[1] - 440) < 45 && b.position[2] < 300) {
           b2_b4 = true;
         }
         // Inductive sensor B5 [120, 310] - metal detection
         if (Math.hypot(b.position[0] - 110, b.position[1] - 310) < 60 && b.position[2] < 320) {
           if (b.material === "metal") b5 = true;
+        }
+        // Gravity magazine presence sensor B_MAG [180, 440]
+        if (b.id !== heldBlockIdRef.current && Math.hypot(b.position[0] - 180, b.position[1] - 440) < 40 && b.position[2] <= 265) {
+          magHasPart = true;
         }
       }
 
@@ -1046,9 +1133,20 @@ export function App() {
         const nextInputs = { ...prev };
         if ("B1" in nextInputs && nextInputs["B1"] !== b1_b3) { nextInputs["B1"] = b1_b3; updated = true; }
         if ("B3" in nextInputs && nextInputs["B3"] !== b1_b3) { nextInputs["B3"] = b1_b3; updated = true; }
+        if ("di_CzujnikPrawy" in nextInputs && nextInputs["di_CzujnikPrawy"] !== b1_b3) { nextInputs["di_CzujnikPrawy"] = b1_b3; updated = true; }
+        if ("B_PRAWY" in nextInputs && nextInputs["B_PRAWY"] !== b1_b3) { nextInputs["B_PRAWY"] = b1_b3; updated = true; }
+
         if ("B2" in nextInputs && nextInputs["B2"] !== b2_b4) { nextInputs["B2"] = b2_b4; updated = true; }
         if ("B4" in nextInputs && nextInputs["B4"] !== b2_b4) { nextInputs["B4"] = b2_b4; updated = true; }
-        if ("B5" in nextInputs && nextInputs["B5"] !== b5) { nextInputs["B5"] = b5; updated = true; }
+        if ("di_CzujnikLewy" in nextInputs && nextInputs["di_CzujnikLewy"] !== b2_b4) { nextInputs["di_CzujnikLewy"] = b2_b4; updated = true; }
+        if ("B_LEWY" in nextInputs && nextInputs["B_LEWY"] !== b2_b4) { nextInputs["B_LEWY"] = b2_b4; updated = true; }
+
+        if ("di_MagazynDetale" in nextInputs && nextInputs["di_MagazynDetale"] !== magHasPart) { nextInputs["di_MagazynDetale"] = magHasPart; updated = true; }
+        if ("B_MAG" in nextInputs && nextInputs["B_MAG"] !== magHasPart) { nextInputs["B_MAG"] = magHasPart; updated = true; }
+
+        if ("B5" in nextInputs && !("di_MagazynDetale" in nextInputs) && nextInputs["B5"] !== b5) { nextInputs["B5"] = b5; updated = true; }
+        else if ("B5" in nextInputs && ("di_MagazynDetale" in nextInputs) && nextInputs["B5"] !== magHasPart) { nextInputs["B5"] = magHasPart; updated = true; }
+
         if (updated) {
           inputsRef.current = nextInputs;
           return nextInputs;
@@ -1473,17 +1571,17 @@ export function App() {
             <input
               type="range"
               min={10}
-              max={100}
+              max={200}
               step={10}
               value={speedOverride}
               onChange={(e) => setSpeedOverride(Number(e.target.value))}
             />
             <b>{speedOverride}%</b>
             <div className="speed-quick-buttons">
-              <button className={speedOverride === 10 ? "active" : ""} onClick={() => setSpeedOverride(10)}>10%</button>
               <button className={speedOverride === 20 ? "active" : ""} onClick={() => setSpeedOverride(20)}>20%</button>
               <button className={speedOverride === 50 ? "active" : ""} onClick={() => setSpeedOverride(50)}>50%</button>
               <button className={speedOverride === 100 ? "active" : ""} onClick={() => setSpeedOverride(100)}>100%</button>
+              <button className={speedOverride === 200 ? "active" : ""} onClick={() => setSpeedOverride(200)}>200% (2x)</button>
             </div>
           </div>
           <div className="tool-switch" aria-label="Wybierz narzędzie">
@@ -1542,7 +1640,7 @@ export function App() {
             <div className="panel-title">LEKCJE RAPID <span>{examples.length}</span></div>
             {examples.map((example) => (
               <div
-                className={`lesson ${!selectedTask && selected.id === example.id ? "selected" : ""}`}
+                className={`lesson ${!selectedTask && selected?.id === example.id ? "selected" : ""}`}
                 key={example.id}
                 onClick={() => selectExample(example)}
                 style={{ cursor: "pointer" }}
@@ -1836,8 +1934,18 @@ export function App() {
               showGravityFeeder={showGravityFeeder}
               showSorterBins={Boolean(selectedTask?.showSorterBins ?? (selectedTask?.id === "task-elm08-101" || selected?.id === "conditions"))}
               showMountingPins={Boolean(selectedTask?.showMountingPins ?? (selectedTask?.id === "task-elm08-107" || selected?.id === "procedures"))}
-              conveyorRunning={Boolean(outputs["doConvRun"] || outputs["START_STOP"])}
-              conveyorDir={Boolean(outputs["doConvDir"] || outputs["LEWO_PRAWO"])}
+              showLinearPallet={Boolean(selectedTask?.id === "task-elm08-113")}
+              showControlDesk={Boolean(selectedTask?.id === "task-elm08-113")}
+              outputs={outputs}
+              onToggleInput={(name) => {
+                setInputs((values) => {
+                  const updated = { ...values, [name]: !values[name] };
+                  inputsRef.current = updated;
+                  return updated;
+                });
+              }}
+              conveyorRunning={Boolean(outputs["doConvRun"] || outputs["START_STOP"] || outputs["do_TasmaStart"])}
+              conveyorDir={Boolean(outputs["doConvDir"] || outputs["LEWO_PRAWO"] || outputs["do_TasmaKierunek"])}
               sensorsActive={inputs}
               activeWObj={code.includes("wobj2") ? "wobj2" : "wobj1"}
               tcp={tcp}
@@ -1932,7 +2040,7 @@ export function App() {
                   <b>Table</b> [{tablePosition.map((value) => Math.round(value)).join(", ")}] mm
                 </span>
               )}
-              {selectedTarget && (
+              {selectedTarget && targetPositions[selectedTarget] && (
                 <span className="sim-edit">
                   <b>Edit</b> {selectedTarget} [{targetPositions[selectedTarget].map((value) => Math.round(value)).join(", ")}]
                 </span>
@@ -1991,6 +2099,26 @@ export function App() {
           onToggle={(name) => {
             if (name === "doGripper") {
               setGripperOutput(!outputs.doGripper);
+            } else if (name === "do_ChwytakON") {
+              const nextVal = !outputs["do_ChwytakON"];
+              setOutputs((values) => {
+                const updated = { ...values, do_ChwytakON: nextVal };
+                outputsRef.current = updated;
+                return updated;
+              });
+              if (nextVal) {
+                setGripperOutput(true);
+              }
+            } else if (name === "do_ChwytakOFF") {
+              const nextVal = !outputs["do_ChwytakOFF"];
+              setOutputs((values) => {
+                const updated = { ...values, do_ChwytakOFF: nextVal };
+                outputsRef.current = updated;
+                return updated;
+              });
+              if (nextVal) {
+                setGripperOutput(false);
+              }
             } else {
               setOutputs((values) => {
                 const updated = { ...values, [name]: !values[name] };
@@ -2062,7 +2190,7 @@ export function App() {
           selectExample(ex);
           setViewingLecture(undefined);
         }}
-        isSelected={!selectedTask && selected.id === viewingLecture.id}
+        isSelected={!selectedTask && selected?.id === viewingLecture.id}
       />
     )}
   </main>;

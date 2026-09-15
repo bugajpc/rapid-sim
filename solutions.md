@@ -2,7 +2,7 @@
 
 Dokument zawiera kompletne, wzorcowe rozwiązania wszystkich zadań dostępnych w symulatorze **RAPID Sim (ABB IRB 1090 / OmniCore / FlexPendant)**:
 - **Część I:** 5 Zadań Treningowych (Podstawy programowania RAPID)
-- **Część II:** 12 Oficjalnych Zadań Egzaminacyjnych CKE Kwalifikacji **ELM.08 (Technik Robotyk)**
+- **Część II:** 13 Oficjalnych Zadań Egzaminacyjnych CKE Kwalifikacji **ELM.08 (Technik Robotyk)**
 
 Każde zadanie zawiera pełny, zweryfikowany kod modułu RAPID, gotowy do uruchomienia w symulatorze lub na fizycznym kontrolerze ABB OmniCore/IRC5, wraz ze szczegółowym komentarzem dydaktycznym.
 
@@ -29,6 +29,7 @@ Każde zadanie zawiera pełny, zweryfikowany kod modułu RAPID, gotowy do urucho
    - [ELM.08-110: Transfer na stanowisko obróbcze B1, wymiana narzędzia i trajektoria z inspekcją pP7](#elm08-110-transfer-na-stanowisko-obróbcze-b1-wymiana-narzędzia-i-trajektoria-z-inspekcją-pp7)
    - [ELM.08-111: Rysowanie kwadratu i okręgu w układzie \WObj:=wobj1 z prędkością v30 i Offs](#elm08-111-rysowanie-kwadratu-i-okręgu-w-układzie-wobjwobj1-z-prędkością-v30-i-offs)
    - [ELM.08-112: Rysowanie w dwóch układach współrzędnych: wobj1 (H1) i wobj2 (H2)](#elm08-112-rysowanie-w-dwóch-układach-współrzędnych-wobj1-h1-i-wobj2-h2)
+   - [ELM.08-113: Kierunkowa segregacja i liniowa paletyzacja detali z raportowaniem danych](#elm08-113-kierunkowa-segregacja-i-liniowa-paletyzacja-detali-z-raportowaniem-danych)
 
 ---
 
@@ -966,3 +967,187 @@ MODULE MainModule
 
 ENDMODULE
 ```
+
+---
+
+## ELM.08-113: Kierunkowa segregacja i liniowa paletyzacja detali z raportowaniem danych
+- **Zagadnienie:** Programowanie zrobotyzowanego stanowiska segregacji kierunkowej, pętla warunkowa `WHILE`, sterowanie zaworem bistabilnym 5/2 (`do_ChwytakON`/`do_ChwytakOFF`), synchronizacja z przenośnikiem dwukierunkowym, wycofanie narzędziowe `RelTool(CRobT(), 0, 0, -50)`, paletyzacja liniowa `Offs(..., nSuma * 35, 0, 0)`, raportowanie danych na panelu operatora `TPWrite`.
+- **Narzędzie:** `tChwytak`
+
+### Tabela sygnałów I/O:
+| Symbol | Nazwa sygnału RAPID | Typ | Opis technologiczny |
+| :--- | :--- | :---: | :--- |
+| **$B_{MAG}$** | `di_MagazynDetale` | DI | Czujnik optyczny obecności detalu w magazynie grawitacyjnym ($1=\text{obecny}$) |
+| **$B_{LEWY}$** | `di_CzujnikLewy` | DI | Czujnik optyczny pozycji lewej / pozycjonera ($X = -310\text{ mm}$, $1=\text{detal na pozycji}$) |
+| **$B_{PRAWY}$** | `di_CzujnikPrawy` | DI | Czujnik optyczny pozycji prawej / odbioru ($X = -60\text{ mm}$, $1=\text{detal na pozycji}$) |
+| **$S1$** | `di_Start` | DI | Przycisk monostabilny START na pulpicie operatora ($1=\text{start}$) |
+| **$S2$** | `di_Kierunek` | DI | Przełącznik bistabilny wyboru kierunku ($1=\text{LEWO}$, $0=\text{PRAWO}$) |
+| **$K1$** | `do_TasmaStart` | DO | Załączenie silnika przenośnika taśmowego ($1=\text{START}$, $0=\text{STOP}$) |
+| **$K2$** | `do_TasmaKierunek` | DO | Stycznik nawrotny kierunku biegu taśmy ($0=\text{LEWO}$, $1=\text{PRAWO}$) |
+| **$Y1$** | `do_ChwytakON` | DO | Cewka zacisku chwytaka (zawór bistabilny 5/2, impuls $0.3\text{ s}$) |
+| **$Y2$** | `do_ChwytakOFF` | DO | Cewka otwarcia chwytaka (zawór bistabilny 5/2, impuls $0.3\text{ s}$) |
+| **$H1$** | `do_LampkaH1` | DO | Lampka sygnalizacyjna ZIELONA (detekcja i gotowość do pobrania) |
+| **$H2$** | `do_LampkaH2` | DO | Lampka sygnalizacyjna CZERWONA (zakończenie cyklu / magazyn pusty) |
+
+### Wykaz punktów (robtarget):
+| Nazwa | X [mm] | Y [mm] | Z [mm] | Opis technologiczny |
+| :--- | :---: | :---: | :---: | :--- |
+| `pHome` | 0 | 300 | 420 | Bezpieczna pozycja bazowa robota |
+| `pMag_Appr` | 180 | 440 | 320 | Pozycja dojazdowa nad magazynem grawitacyjnym |
+| `pMag_Pick` | 180 | 440 | 255 | Pozycja pobrania dolnego detalu z magazynu |
+| `pTasma_Appr` | -180 | 440 | 320 | Pozycja dojazdowa nad środkiem taśmy |
+| `pTasma_Put` | -180 | 440 | 255 | Pozycja odłożenia detalu na taśmociąg |
+| `pLewy_Appr` | -310 | 440 | 320 | Pozycja dojazdowa nad lewy pozycjoner |
+| `pLewy_Pick` | -310 | 440 | 255 | Pozycja pobrania z lewego pozycjonera |
+| `pPrawy_Appr` | -60 | 440 | 320 | Pozycja dojazdowa nad prawą strefę odbiorczą |
+| `pPrawy_Pick` | -60 | 440 | 255 | Pozycja pobrania z prawej strefy odbiorczej |
+| `pPaleta_Appr`| -70 | 310 | 310 | Pozycja dojazdowa nad gniazdo bazowe palety |
+| `pPaleta_Baza`| -70 | 310 | 245 | Pozycja bazowa pierwszego gniazda palety liniowej |
+
+### Kod programu:
+```rapid
+MODULE ModulEgzaminacyjny
+
+    ! Zmienne licznikowe do ewidencji produkcji
+    VAR num nLewo := 0;
+    VAR num nPrawo := 0;
+    VAR num nSuma := 0;
+
+    PROC main()
+        ! Krok 1: Inicjalizacja elementow wykonawczych i sygnalizacji
+        Reset do_TasmaStart;
+        Reset do_TasmaKierunek;
+        Reset do_LampkaH1;
+        Reset do_LampkaH2;
+        
+        ! Otwarcie chwytaka (sterowanie zaworem bistabilnym Y2)
+        Set do_ChwytakOFF;
+        WaitTime 0.3;
+        Reset do_ChwytakOFF;
+
+        ! Wyzerowanie zmiennych ewidencji
+        nLewo := 0;
+        nPrawo := 0;
+        nSuma := 0;
+
+        ! Krok 2: Bazowanie robota i oczekiwanie na operatora
+        MoveJ pHome, v200, fine, tChwytak;
+        TPWrite "Stanowisko zrobotyzowane gotowe do pracy.";
+        TPWrite "Nacisnij przycisk START (S1) aby rozpoczac cykl...";
+        WaitDI di_Start, 1;
+
+        ! Krok 3: Glowna petla cyklu - praca do oproznienia magazynu
+        WHILE di_MagazynDetale = 1 DO
+            ! Pobranie detalu z magazynu grawitacyjnego
+            MoveJ pMag_Appr, v200, z10, tChwytak;
+            MoveL pMag_Pick, v100, fine, tChwytak;
+            Set do_ChwytakON;
+            WaitTime 0.3;
+            Reset do_ChwytakON;
+            MoveL RelTool(CRobT(), 0, 0, -50), v100, z10, tChwytak;
+
+            ! Transport detalu na srodek tasmy przenosnika
+            MoveJ pTasma_Appr, v200, z10, tChwytak;
+            MoveL pTasma_Put, v100, fine, tChwytak;
+            Set do_ChwytakOFF;
+            WaitTime 0.3;
+            Reset do_ChwytakOFF;
+            MoveL RelTool(CRobT(), 0, 0, -50), v100, z10, tChwytak;
+            MoveJ pHome, v200, fine, tChwytak;
+
+            ! Decyzja kierunkowa na podstawie przelacznika S2
+            IF di_Kierunek = 1 THEN
+                ! Wariant A: Transport w LEWO do czujnika B_LEWY
+                Reset do_TasmaKierunek;
+                Set do_TasmaStart;
+                WaitDI di_CzujnikLewy, 1;
+                Reset do_TasmaStart;
+
+                ! Sygnalizacja obecnosci detalu lampka zielona H1
+                Set do_LampkaH1;
+                WaitTime 0.5;
+                Reset do_LampkaH1;
+
+                ! Pobranie z pozycjonera lewego
+                MoveJ pLewy_Appr, v200, z10, tChwytak;
+                MoveL pLewy_Pick, v100, fine, tChwytak;
+                Set do_ChwytakON;
+                WaitTime 0.3;
+                Reset do_ChwytakON;
+                MoveL RelTool(CRobT(), 0, 0, -50), v100, z10, tChwytak;
+
+                nLewo := nLewo + 1;
+            ELSE
+                ! Wariant B: Transport w PRAWO do czujnika B_PRAWY
+                Set do_TasmaKierunek;
+                Set do_TasmaStart;
+                WaitDI di_CzujnikPrawy, 1;
+                Reset do_TasmaStart;
+
+                ! Sygnalizacja obecnosci detalu lampka zielona H1
+                Set do_LampkaH1;
+                WaitTime 0.5;
+                Reset do_LampkaH1;
+
+                ! Pobranie z pozycji koncowej prawej
+                MoveJ pPrawy_Appr, v200, z10, tChwytak;
+                MoveL pPrawy_Pick, v100, fine, tChwytak;
+                Set do_ChwytakON;
+                WaitTime 0.3;
+                Reset do_ChwytakON;
+                MoveL RelTool(CRobT(), 0, 0, -50), v100, z10, tChwytak;
+
+                nPrawo := nPrawo + 1;
+            ENDIF
+
+            ! Krok 4: Paletyzacja liniowa z dynamicznym przesunieciem wzdluz osi X
+            ! Offset wynosi: nSuma * 35 mm wzdluz osi X
+            MoveJ Offs(pPaleta_Appr, nSuma * 35, 0, 0), v200, z10, tChwytak;
+            MoveL Offs(pPaleta_Baza, nSuma * 35, 0, 0), v100, fine, tChwytak;
+            Set do_ChwytakOFF;
+            WaitTime 0.3;
+            Reset do_ChwytakOFF;
+            MoveL Offs(pPaleta_Appr, nSuma * 35, 0, 0), v150, z10, tChwytak;
+
+            ! Inkrementacja sumarycznego licznika paletyzacji
+            nSuma := nSuma + 1;
+
+            ! Powrot do pozycji bezpiecznej pHome
+            MoveJ pHome, v200, fine, tChwytak;
+        ENDWHILE
+
+        ! Krok 5: Zakonczenie cyklu produkcyjnego i raportowanie danych
+        Set do_LampkaH2;
+        TPWrite "========================================";
+        TPWrite "CYKL ZAKONCZONY - MAGAZYN PUSTY";
+        TPWrite "Detale w lewo: " \Num:=nLewo;
+        TPWrite "Detale w prawo: " \Num:=nPrawo;
+        TPWrite "Laczna liczba detali na palecie: " \Num:=nSuma;
+        TPWrite "========================================";
+
+    ENDPROC
+
+ENDMODULE
+```
+
+### Omówienie dydaktyczne:
+1. **Sterowanie zaworem bistabilnym 5/2:** W układach pneumatycznych z zaworami bistabilnymi impuls na cewkę $Y1$ (`do_ChwytakON`) przesterowuje suwak w pozycję zaciśnięcia chwytaka, a impuls na cewkę $Y2$ (`do_ChwytakOFF`) w pozycję otwarcia. Zgodnie z dobrymi praktykami mechatronicznymi cewki wzbudzane są krótkimi impulsami ($0.3\text{ s}$), zapobiegając przegrzaniu elektromagnesów oraz jednoczesnemu podaniu napięcia na obie cewki.
+2. **Wycofanie w osi narzędzia `RelTool(CRobT(), 0, 0, -50)`:** Zastosowanie `CRobT()` odczytuje aktualne współrzędne TCP robota, a `RelTool` przelicza przesunięcie w układzie współrzędnych narzędzia. Ponieważ oś $+Z$ chwytaka skierowana jest w dół ku detalowi, ujemne przesunięcie $-50\text{ mm}$ realizuje idealne, pionowe wycofanie robota po pobraniu lub odłożeniu detalu, bez kolizji z prowadnicami magazynu.
+3. **Pętla sterowana czujnikiem `WHILE di_MagazynDetale = 1 DO`:** Program przetwarza kolejne detale tak długo, jak długo czujnik optyczny $B_{MAG}$ zgłasza obecność obiektu w szczelinie pobrania. Usunięcie ostatniego (czwartego) detalu powoduje natychmiastowe zakończenie pętli i przejście do procedury raportowania.
+4. **Dynamiczna paletyzacja liniowa `Offs(pPaleta_Baza, nSuma * 35, 0, 0)`:** Rozstaw gniazd palety wynosi $35\text{ mm}$. Zmienna `nSuma` przechowuje liczbę dotychczas ułożonych elementów, co pozwala zrealizować układanie kolejno w gniazdach $0\text{ mm}$, $35\text{ mm}$, $70\text{ mm}$, $105\text{ mm}$ itd.
+5. **Raportowanie na panelu FlexPendant:** Wykorzystanie instrukcji `TPWrite` z parametrem `\Num` umożliwia czytelne wyświetlenie operatorowi danych statystycznych: podziału na kierunki oraz sumy wyprodukowanych detali, co spełnia standardy przemysłowego monitoringu produkcji.
+
+### Kryteria oceny CKE (Kwalifikacja ELM.08):
+| Nr | Rezultat / Kryterium wykonania | Liczba punktów |
+| :---: | :--- | :---: |
+| 1 | Prawidłowa deklaracja zmiennych licznikowych `nLewo`, `nPrawo`, `nSuma` typu `num` | 2 |
+| 2 | Inicjalizacja sygnałów wyjściowych oraz bazowanie ramienia w punkcie `pHome` | 2 |
+| 3 | Prawidłowe użycie instrukcji `WaitDI di_Start, 1` przed startem cyklu | 2 |
+| 4 | Zastosowanie pętli warunkowej `WHILE di_MagazynDetale = 1 DO` | 3 |
+| 5 | Prawidłowe sterowanie bistabilnym chwytakiem (impulsy na `do_ChwytakON` i `do_ChwytakOFF`) | 2 |
+| 6 | Użycie funkcji wycofania `RelTool` w osi Z narzędzia przy pobieraniu/odkładaniu | 2 |
+| 7 | Poprawna struktura decyzyjna `IF di_Kierunek = 1 THEN ... ELSE ... ENDIF` | 2 |
+| 8 | Zatrzymanie taśmy czujnikiem `WaitDI di_CzujnikLewy/Prawy` i sygnalizacja `do_LampkaH1` | 2 |
+| 9 | Obliczenie pozycji paletyzacji z krokiem $35\text{ mm}$ za pomocą instrukcji `Offs` | 2 |
+| 10 | Załączenie lampki `do_LampkaH2` i wyświetlenie raportu `TPWrite` z liczbą detali | 1 |
+| **SUMA** | **Maksymalna ocena za część programistyczną** | **20** |
